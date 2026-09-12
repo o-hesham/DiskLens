@@ -25,6 +25,18 @@ MainWindow::MainWindow(QWidget *parent)
     setupUi();
 }
 
+MainWindow::~MainWindow()
+{
+    if (cancellationToken_)
+        cancellationToken_->requestCancellation();
+
+    if (scanThread_ && scanThread_->isRunning())
+    {
+        scanThread_->quit();
+        scanThread_->wait();
+    }
+}
+
 void MainWindow::setupUi()
 {
 
@@ -92,7 +104,8 @@ void MainWindow::setupUi()
     // Status bar
     statusBar_ = new QStatusBar(this);
     setStatusBar(statusBar_);
-    statusBar_->showMessage(QStringLiteral("Ready"));
+    statusLabel_ = new QLabel(QStringLiteral("Ready"), statusBar_);
+    statusBar_->addWidget(statusLabel_, 1);
 
     connect(selectFolderAction_, &QAction::triggered, this, [this]()
             { 
@@ -108,7 +121,7 @@ void MainWindow::setupUi()
                 locationsList_->setCurrentRow(locationsList_->count()-1);
 
                 startScanAction_->setEnabled(true);
-                statusBar_->showMessage(QStringLiteral("Folder added")); });
+                statusLabel_->setText(QStringLiteral("Folder added")); });
 
     connect(startScanAction_, &QAction::triggered, this, &MainWindow::startScan);
     connect(cancelScanAction_, &QAction::triggered, this, &MainWindow::cancelScan);
@@ -122,7 +135,7 @@ void MainWindow::startScan()
     const auto *selectedItem = locationsList_->currentItem();
     if (!selectedItem)
     {
-        statusBar_->showMessage(QStringLiteral("Select a folder first"));
+        statusLabel_->setText(QStringLiteral("Select a folder first"));
         return;
     }
 
@@ -134,5 +147,67 @@ void MainWindow::startScan()
     // Move the scan job to the background thread so scanning does not freeze the UI.
     scanJob_->moveToThread(scanThread_);
 
+    // Start scanning when the background thread begins running.
     connect(scanThread_, &QThread::started, scanJob_, &DiskLens::ScanJob::run);
+
+    // Send the completed scan result back to MainWindow for UI updates.
+    connect(scanJob_, &DiskLens::ScanJob::finished, this, &MainWindow::handleScanFinished);
+
+    // Stop the background thread after the scan finishes.
+    connect(scanJob_, &DiskLens::ScanJob::finished, scanThread_, &QThread::quit);
+
+    // Safely delete the scan job in its own thread.
+    connect(scanJob_, &DiskLens::ScanJob::finished, scanJob_, &QObject::deleteLater);
+
+    // Clear references after the thread is deleted to prevent dangling pointers.
+    connect(scanThread_, &QObject::destroyed, this, [this]()
+            {
+        scanThread_ = nullptr;
+        scanJob_ = nullptr;
+        cancellationToken_.reset(); 
+    
+        startScanAction_->setEnabled(locationsList_->count() > 0); });
+
+    // Safely delete the thread object after it stops.
+    connect(scanThread_, &QThread::finished, scanThread_, &QObject::deleteLater);
+
+    startScanAction_->setEnabled(false);
+    cancelScanAction_->setEnabled(true);
+    statusLabel_->setText(QStringLiteral("Scanning..."));
+
+    scanThread_->start();
+}
+
+void MainWindow::cancelScan()
+{
+    if (!cancellationToken_)
+        return;
+
+    cancellationToken_->requestCancellation();
+
+    cancelScanAction_->setEnabled(false);
+    statusLabel_->setText(QStringLiteral("Cancelling..."));
+}
+
+void MainWindow::handleScanFinished(const DiskLens::ScanResult &result)
+{
+    cancelScanAction_->setEnabled(false);
+
+    switch (result.status)
+    {
+    case DiskLens::ScanStatus::Completed:
+        statusLabel_->setText(
+            QStringLiteral("Scan complete: %1 entries found").arg(result.entries.size()));
+        break;
+
+    case DiskLens::ScanStatus::Cancelled:
+        statusLabel_->setText(
+            QStringLiteral("Scan cancelled"));
+        break;
+
+    case DiskLens::ScanStatus::InvalidRoot:
+        statusLabel_->setText(
+            QStringLiteral("The selected folder is invalid"));
+        break;
+    }
 }

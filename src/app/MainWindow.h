@@ -28,6 +28,7 @@ class MainWindow final : public QMainWindow
 
 public:
     explicit MainWindow(QWidget *parent = nullptr);
+    ~MainWindow() override;
 
 private:
     void setupUi();
@@ -54,6 +55,7 @@ private:
     QLabel *detailsLabel_ = nullptr;
 
     QStatusBar *statusBar_ = nullptr;
+    QLabel *statusLabel_ = nullptr;
 
     QThread *scanThread_ = nullptr;
     DiskLens::ScanJob *scanJob_ = nullptr;
