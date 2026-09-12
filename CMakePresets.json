@@ -1,0 +1,30 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 25,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "windows-mingw-debug",
+      "displayName": "Windows MinGW Debug",
+      "description": "Debug build using the Qt 6.11.1 MinGW kit installed in D:/Qt.",
+      "generator": "MinGW Makefiles",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_PREFIX_PATH": "D:/Qt/6.11.1/mingw_64",
+        "CMAKE_CXX_COMPILER": "D:/Qt/Tools/mingw1310_64/bin/g++.exe",
+        "CMAKE_MAKE_PROGRAM": "D:/Qt/Tools/mingw1310_64/bin/mingw32-make.exe",
+        "DISKLENS_QT_DEPLOY_TOOL": "D:/Qt/6.11.1/mingw_64/bin/windeployqt.exe"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "windows-mingw-debug",
+      "configurePreset": "windows-mingw-debug"
+    }
+  ]
+}

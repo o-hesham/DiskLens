@@ -1,0 +1,8 @@
+build/
+.vs/
+.vscode/ipch/
+*.user
+*.suo
+*.opensdf
+*.VC.db
+compile_commands.json

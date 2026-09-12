@@ -1,0 +1,47 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "DiskLens: Configure",
+      "type": "shell",
+      "command": "cmake --preset windows-mingw-debug",
+      "group": "build",
+      "problemMatcher": "$gcc",
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "DiskLens: Build",
+      "type": "shell",
+      "command": "cmake --build --preset windows-mingw-debug",
+      "dependsOn": "DiskLens: Configure",
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": "$gcc",
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "DiskLens: Run",
+      "type": "shell",
+      "command": "${workspaceFolder}/build/windows-mingw-debug/DiskLens.exe",
+      "dependsOn": "DiskLens: Build",
+      "problemMatcher": [],
+      "options": {
+        "env": {
+          "PATH": "D:/Qt/6.11.1/mingw_64/bin;D:/Qt/Tools/mingw1310_64/bin;${env:PATH}"
+        }
+      },
+      "presentation": {
+        "reveal": "never",
+        "panel": "dedicated"
+      }
+    }
+  ]
+}

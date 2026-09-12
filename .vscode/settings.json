@@ -1,0 +1,15 @@
+{
+  "cmake.useCMakePresets": "always",
+  "cmake.configureOnOpen": false,
+  "cmake.generator": "MinGW Makefiles",
+  "cmake.buildDirectory": "${workspaceFolder}/build/${presetName}",
+  "cmake.configureSettings": {
+    "CMAKE_PREFIX_PATH": "D:/Qt/6.11.1/mingw_64"
+  },
+  "C_Cpp.default.compileCommands": "${workspaceFolder}/build/windows-mingw-debug/compile_commands.json",
+  "C_Cpp.default.compilerPath": "D:/Qt/Tools/mingw1310_64/bin/g++.exe",
+  "C_Cpp.default.cppStandard": "c++17",
+  "files.associations": {
+    "*.ui": "xml"
+  }
+}
