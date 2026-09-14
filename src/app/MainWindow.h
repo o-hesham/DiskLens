@@ -13,11 +13,17 @@ class QListWidget;
 class QLabel;
 class QStatusBar;
 class QThread;
+class QTableView;
+class QSortFilterProxyModel;
+class QModelIndex;
+class QLineEdit;
+class QTimer;
 
 namespace DiskLens
 {
     class ScanJob;
     class CancellationToken;
+    class FileTableModel;
     struct ScanResult;
 
 } // namespace DiskLens
@@ -32,6 +38,12 @@ public:
 
 private:
     void setupUi();
+
+    void startScan();
+    void cancelScan();
+    void handleScanFinished(const DiskLens::ScanResult &result);
+
+    void updateDetails(const QModelIndex &proxyIndex);
 
     QMenu *fileMenu_ = nullptr;
     QMenu *scanMenu_ = nullptr;
@@ -61,7 +73,12 @@ private:
     DiskLens::ScanJob *scanJob_ = nullptr;
     std::shared_ptr<DiskLens::CancellationToken> cancellationToken_;
 
-    void startScan();
-    void cancelScan();
-    void handleScanFinished(const DiskLens::ScanResult &result);
+    QTableView *fileTableView_ = nullptr;
+    DiskLens::FileTableModel *fileTableModel_ = nullptr;
+
+    QSortFilterProxyModel *fileProxyModel_ = nullptr;
+
+    QLineEdit *searchEdit_ = nullptr;
+
+    QTimer *searchTimer_ = nullptr;
 };

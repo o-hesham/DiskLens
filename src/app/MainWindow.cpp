@@ -1,6 +1,7 @@
 #include "MainWindow.h"
 #include "AppVersion.h"
 #include "../core/jobs/ScanJob.h"
+#include "../ui/models/FileTableModel.h"
 
 #include <QMenuBar>
 #include <QMenu>
@@ -15,6 +16,13 @@
 #include <QFileDialog>
 #include <QDir>
 #include <QThread>
+#include <QTableView>
+#include <QSortFilterProxyModel>
+#include <QHeaderView>
+#include <QItemSelectionModel>
+#include <QLocale>
+#include <QLineEdit>
+#include <QTimer>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -86,12 +94,48 @@ void MainWindow::setupUi()
 
     emptyStateLabel_ = new QLabel(QStringLiteral("Choose a folder to begin"), contentPanel_);
     emptyStateLabel_->setAlignment(Qt::AlignCenter);
+
     contentLayout->addWidget(emptyStateLabel_);
 
-    // Right
+    searchEdit_ = new QLineEdit(contentPanel_);
+    searchEdit_->setPlaceholderText(QStringLiteral("Search scanned entries..."));
+    searchEdit_->setClearButtonEnabled(true);
+    searchEdit_->setEnabled(false);
+
+    contentLayout->addWidget(searchEdit_);
+
+    searchTimer_ = new QTimer(this);
+    searchTimer_->setSingleShot(true);
+    searchTimer_->setInterval(200);
+
+    fileTableModel_ = new DiskLens::FileTableModel(this);
+    fileTableView_ = new QTableView(contentPanel_);
+
+    fileProxyModel_ = new QSortFilterProxyModel(this);
+    fileProxyModel_->setSourceModel(fileTableModel_);
+    fileProxyModel_->setSortRole(DiskLens::FileTableModel::SortRole);
+    fileProxyModel_->setSortCaseSensitivity(Qt::CaseInsensitive);
+    fileProxyModel_->setFilterKeyColumn(-1);
+    fileProxyModel_->setFilterCaseSensitivity(Qt::CaseInsensitive);
+
+    fileTableView_->setModel(fileProxyModel_);
+    fileTableView_->setSortingEnabled(true);
+    fileTableView_->sortByColumn(DiskLens::FileTableModel::NameColumn, Qt::AscendingOrder);
+    fileTableView_->setAlternatingRowColors(true);
+    fileTableView_->setSelectionBehavior(QAbstractItemView::SelectRows);
+    fileTableView_->setSelectionMode(QAbstractItemView::SingleSelection);
+    fileTableView_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    fileTableView_->verticalHeader()->hide();
+
+    fileTableView_->hide();
+    contentLayout->addWidget(fileTableView_);
+
+    // Right panel
     auto *detailsLayout = new QVBoxLayout(detailsPanel_);
     detailsLabel_ = new QLabel(QStringLiteral("No file selected"), detailsPanel_);
-    detailsLabel_->setAlignment(Qt::AlignCenter);
+    detailsLabel_->setAlignment(Qt::AlignTop | Qt::AlignLeft);
+    detailsLabel_->setWordWrap(true);
+    detailsLabel_->setTextInteractionFlags(Qt::TextSelectableByMouse);
     detailsLayout->addWidget(detailsLabel_);
 
     // Main window content
@@ -108,23 +152,28 @@ void MainWindow::setupUi()
     statusBar_->addWidget(statusLabel_, 1);
 
     connect(selectFolderAction_, &QAction::triggered, this, [this]()
-            { 
-                const QString folder = QFileDialog::getExistingDirectory(this, QStringLiteral("Select folder")); 
-                if(folder.isEmpty())
-                    return;
-                
-                const QString cleanFolder = QDir::cleanPath(folder);
-                if(!locationsList_->findItems(cleanFolder, Qt::MatchExactly).isEmpty()) //Return empty if no dupe
-                    return; 
+            {
+        const QString folder = QFileDialog::getExistingDirectory(this, QStringLiteral("Select folder"));
+        if (folder.isEmpty())
+            return;
 
-                locationsList_->addItem(cleanFolder);
-                locationsList_->setCurrentRow(locationsList_->count()-1);
+        const QString cleanFolder = QDir::cleanPath(folder);
+        if (!locationsList_->findItems(cleanFolder, Qt::MatchExactly).isEmpty()) // Return empty if no dupe
+            return;
 
-                startScanAction_->setEnabled(true);
-                statusLabel_->setText(QStringLiteral("Folder added")); });
+        locationsList_->addItem(cleanFolder);
+        locationsList_->setCurrentRow(locationsList_->count() - 1);
+
+        startScanAction_->setEnabled(true);
+        statusLabel_->setText(QStringLiteral("Folder added")); });
 
     connect(startScanAction_, &QAction::triggered, this, &MainWindow::startScan);
     connect(cancelScanAction_, &QAction::triggered, this, &MainWindow::cancelScan);
+    connect(fileTableView_->selectionModel(), &QItemSelectionModel::currentRowChanged, this, &MainWindow::updateDetails);
+    connect(searchEdit_, &QLineEdit::textChanged, this, [this]()
+            { searchTimer_->start(); });
+    connect(searchTimer_, &QTimer::timeout, this, [this]()
+            { fileProxyModel_->setFilterFixedString(searchEdit_->text()); });
 }
 
 void MainWindow::startScan()
@@ -175,6 +224,17 @@ void MainWindow::startScan()
     cancelScanAction_->setEnabled(true);
     statusLabel_->setText(QStringLiteral("Scanning..."));
 
+    fileTableModel_->setEntries({});
+    fileTableView_->hide();
+
+    emptyStateLabel_->setText(QStringLiteral("Scanning..."));
+    emptyStateLabel_->show();
+
+    searchEdit_->clear();
+    searchEdit_->setEnabled(false);
+
+    detailsLabel_->setText(QStringLiteral("No file selected"));
+
     scanThread_->start();
 }
 
@@ -193,6 +253,22 @@ void MainWindow::handleScanFinished(const DiskLens::ScanResult &result)
 {
     cancelScanAction_->setEnabled(false);
 
+    fileTableModel_->setEntries(result.entries);
+
+    searchEdit_->setEnabled(!result.entries.isEmpty());
+
+    if (result.entries.isEmpty())
+    {
+        fileTableView_->hide();
+        emptyStateLabel_->setText(QStringLiteral("No scan results"));
+        emptyStateLabel_->show();
+    }
+    else
+    {
+        emptyStateLabel_->hide();
+        fileTableView_->show();
+    }
+
     switch (result.status)
     {
     case DiskLens::ScanStatus::Completed:
@@ -210,4 +286,49 @@ void MainWindow::handleScanFinished(const DiskLens::ScanResult &result)
             QStringLiteral("The selected folder is invalid"));
         break;
     }
+}
+
+void MainWindow::updateDetails(const QModelIndex &proxyIndex)
+{
+    if (!proxyIndex.isValid())
+    {
+        detailsLabel_->setText(QStringLiteral("No file selected"));
+        return;
+    }
+
+    // The table uses the proxy model for sorting.
+    // Convert its row index back to the original FileTableModel index.
+    const QModelIndex sourceIndex = fileProxyModel_->mapToSource(proxyIndex);
+
+    // Retrieve the FileEntry represented by the selected source row.
+    const DiskLens::FileEntry *entry = fileTableModel_->entryAt(sourceIndex.row());
+    if (!entry)
+    {
+        detailsLabel_->setText(QStringLiteral("No file selected"));
+        return;
+    }
+
+    QString kind;
+    if (entry->isSymbolicLink)
+        kind = QStringLiteral("Symbolic link");
+    else if (entry->isDirectory)
+        kind = QStringLiteral("Folder");
+    else
+        kind = QStringLiteral("File");
+
+    const QString size = entry->isDirectory ? QStringLiteral("—") : QLocale().formattedDataSize(entry->sizeBytes);
+
+    QString details = QStringLiteral("Name: ");
+    details += entry->name;
+    details += QStringLiteral("\nKind: ");
+    details += kind;
+    details += QStringLiteral("\nSize: ");
+    details += size;
+    details += QStringLiteral("\nModified: ");
+    details += QLocale().toString(
+        entry->lastModified, QLocale::ShortFormat);
+    details += QStringLiteral("\n\nPath:\n");
+    details += entry->absolutePath;
+
+    detailsLabel_->setText(details);
 }
