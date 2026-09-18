@@ -2,6 +2,7 @@
 #include "AppVersion.h"
 #include "../core/jobs/ScanJob.h"
 #include "../ui/models/FileTableModel.h"
+#include "../ui/models/StorageTreeModel.h"
 
 #include <QMenuBar>
 #include <QMenu>
@@ -23,6 +24,8 @@
 #include <QLocale>
 #include <QLineEdit>
 #include <QTimer>
+#include <QTabWidget>
+#include <QTreeView>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -127,8 +130,17 @@ void MainWindow::setupUi()
     fileTableView_->setEditTriggers(QAbstractItemView::NoEditTriggers);
     fileTableView_->verticalHeader()->hide();
 
-    fileTableView_->hide();
-    contentLayout->addWidget(fileTableView_);
+    contentTabs_ = new QTabWidget(contentPanel_);
+    contentTabs_->addTab(fileTableView_, QStringLiteral("Files"));
+
+    storageTreeView_ = new QTreeView(contentTabs_);
+    contentTabs_->addTab(storageTreeView_, QStringLiteral("Storage Tree"));
+
+    storageTreeModel_ = new DiskLens::StorageTreeModel(this);
+    storageTreeView_->setModel(storageTreeModel_);
+
+    contentTabs_->hide();
+    contentLayout->addWidget(contentTabs_);
 
     // Right panel
     auto *detailsLayout = new QVBoxLayout(detailsPanel_);
@@ -196,6 +208,24 @@ void MainWindow::startScan()
     // Move the scan job to the background thread so scanning does not freeze the UI.
     scanJob_->moveToThread(scanThread_);
 
+    startScanAction_->setEnabled(false);
+    cancelScanAction_->setEnabled(true);
+    statusLabel_->setText(QStringLiteral("Scanning..."));
+
+    fileTableModel_->setEntries({});
+    contentTabs_->hide();
+
+    storageTreeModel_->setRoot(nullptr);
+    storageTree_.build({});
+
+    emptyStateLabel_->setText(QStringLiteral("Scanning..."));
+    emptyStateLabel_->show();
+
+    searchEdit_->clear();
+    searchEdit_->setEnabled(false);
+
+    detailsLabel_->setText(QStringLiteral("No file selected"));
+
     // Start scanning when the background thread begins running.
     connect(scanThread_, &QThread::started, scanJob_, &DiskLens::ScanJob::run);
 
@@ -220,21 +250,6 @@ void MainWindow::startScan()
     // Safely delete the thread object after it stops.
     connect(scanThread_, &QThread::finished, scanThread_, &QObject::deleteLater);
 
-    startScanAction_->setEnabled(false);
-    cancelScanAction_->setEnabled(true);
-    statusLabel_->setText(QStringLiteral("Scanning..."));
-
-    fileTableModel_->setEntries({});
-    fileTableView_->hide();
-
-    emptyStateLabel_->setText(QStringLiteral("Scanning..."));
-    emptyStateLabel_->show();
-
-    searchEdit_->clear();
-    searchEdit_->setEnabled(false);
-
-    detailsLabel_->setText(QStringLiteral("No file selected"));
-
     scanThread_->start();
 }
 
@@ -253,28 +268,41 @@ void MainWindow::handleScanFinished(const DiskLens::ScanResult &result)
 {
     cancelScanAction_->setEnabled(false);
 
+    storageTreeModel_->setRoot(nullptr);
+
+    if (result.status == DiskLens::ScanStatus::InvalidRoot)
+        storageTree_.build({});
+    else
+        storageTree_.build(result);
+
+    storageTreeModel_->setRoot(storageTree_.root());
     fileTableModel_->setEntries(result.entries);
 
     searchEdit_->setEnabled(!result.entries.isEmpty());
 
     if (result.entries.isEmpty())
     {
-        fileTableView_->hide();
+        contentTabs_->hide();
+        ;
         emptyStateLabel_->setText(QStringLiteral("No scan results"));
         emptyStateLabel_->show();
     }
     else
     {
         emptyStateLabel_->hide();
-        fileTableView_->show();
+        contentTabs_->show();
     }
 
     switch (result.status)
     {
     case DiskLens::ScanStatus::Completed:
-        statusLabel_->setText(
-            QStringLiteral("Scan complete: %1 entries found").arg(result.entries.size()));
+    {
+        const auto *root = storageTree_.root();
+        if (root)
+            statusLabel_->setText(
+                QStringLiteral("Scan complete: %1 files, %2 bytes").arg(root->fileCount).arg(root->totalSizeBytes));
         break;
+    }
 
     case DiskLens::ScanStatus::Cancelled:
         statusLabel_->setText(

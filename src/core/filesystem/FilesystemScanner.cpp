@@ -11,6 +11,8 @@ namespace DiskLens
         ScanResult result;
 
         const QFileInfo rootInfo{rootPath};
+        result.rootPath = rootInfo.absoluteFilePath();
+
         if (!rootInfo.exists() || !rootInfo.isDir())
         {
             result.status = ScanStatus::InvalidRoot;
@@ -22,7 +24,7 @@ namespace DiskLens
         const auto flags = Flag::Recursive | Flag::IncludeHidden | Flag::IncludeBrokenSymlinks;
 
         // Scan each file and folder, then save its information.
-        for (const auto &directoryEntry : QDirListing(rootPath, flags))
+        for (const auto &directoryEntry : QDirListing(result.rootPath, flags))
         {
             if (token.isCancellationRequested())
             {

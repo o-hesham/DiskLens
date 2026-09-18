@@ -1,5 +1,7 @@
 #pragma once
 
+#include "../core/analysis/StorageTree.h"
+
 #include <QMainWindow>
 
 #include <memory>
@@ -18,12 +20,15 @@ class QSortFilterProxyModel;
 class QModelIndex;
 class QLineEdit;
 class QTimer;
+class QTabWidget;
+class QTreeView;
 
 namespace DiskLens
 {
     class ScanJob;
     class CancellationToken;
     class FileTableModel;
+    class StorageTreeModel;
     struct ScanResult;
 
 } // namespace DiskLens
@@ -73,8 +78,14 @@ private:
     DiskLens::ScanJob *scanJob_ = nullptr;
     std::shared_ptr<DiskLens::CancellationToken> cancellationToken_;
 
+    QTabWidget *contentTabs_ = nullptr;
+
     QTableView *fileTableView_ = nullptr;
     DiskLens::FileTableModel *fileTableModel_ = nullptr;
+
+    DiskLens::StorageTree storageTree_;
+    DiskLens::StorageTreeModel *storageTreeModel_ = nullptr;
+    QTreeView *storageTreeView_ = nullptr;
 
     QSortFilterProxyModel *fileProxyModel_ = nullptr;
 

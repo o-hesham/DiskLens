@@ -4,6 +4,7 @@
 
 #include <QVector>
 #include <QMetaType>
+#include <QString>
 
 namespace DiskLens
 {
@@ -17,6 +18,7 @@ namespace DiskLens
 
     struct ScanResult
     {
+        QString rootPath;
         QVector<FileEntry> entries;
         ScanStatus status = ScanStatus::Completed;
     };
