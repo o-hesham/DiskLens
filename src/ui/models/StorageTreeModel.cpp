@@ -61,6 +61,14 @@ namespace DiskLens
         endResetModel();
     }
 
+    const StorageNode *StorageTreeModel::nodeAt(const QModelIndex &index) const
+    {
+        if (!root_ || !index.isValid() || index.model() != this)
+            return nullptr;
+
+        return static_cast<const StorageNode *>(index.internalPointer());
+    }
+
     int StorageTreeModel::columnCount(const QModelIndex &) const
     {
         return ColumnCount;

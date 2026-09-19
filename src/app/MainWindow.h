@@ -49,6 +49,7 @@ private:
     void handleScanFinished(const DiskLens::ScanResult &result);
 
     void updateDetails(const QModelIndex &proxyIndex);
+    void updateTreeDetails(const QModelIndex &index);
 
     QMenu *fileMenu_ = nullptr;
     QMenu *scanMenu_ = nullptr;

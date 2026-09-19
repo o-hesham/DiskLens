@@ -138,6 +138,9 @@ void MainWindow::setupUi()
 
     storageTreeModel_ = new DiskLens::StorageTreeModel(this);
     storageTreeView_->setModel(storageTreeModel_);
+    storageTreeView_->setSelectionBehavior(QAbstractItemView::SelectRows);
+    storageTreeView_->setSelectionMode(QAbstractItemView::SingleSelection);
+    storageTreeView_->setEditTriggers(QAbstractItemView::NoEditTriggers);
 
     contentTabs_->hide();
     contentLayout->addWidget(contentTabs_);
@@ -186,6 +189,13 @@ void MainWindow::setupUi()
             { searchTimer_->start(); });
     connect(searchTimer_, &QTimer::timeout, this, [this]()
             { fileProxyModel_->setFilterFixedString(searchEdit_->text()); });
+    connect(storageTreeView_->selectionModel(), &QItemSelectionModel::currentRowChanged, this, &MainWindow::updateTreeDetails);
+    connect(contentTabs_, &QTabWidget::currentChanged, this, [this](int tabIndex)
+            {
+        if(contentTabs_->widget(tabIndex) == fileTableView_)
+            updateDetails(fileTableView_->currentIndex());
+        else
+            updateTreeDetails(storageTreeView_->currentIndex()); });
 }
 
 void MainWindow::startScan()
@@ -283,7 +293,7 @@ void MainWindow::handleScanFinished(const DiskLens::ScanResult &result)
     if (result.entries.isEmpty())
     {
         contentTabs_->hide();
-        ;
+
         emptyStateLabel_->setText(QStringLiteral("No scan results"));
         emptyStateLabel_->show();
     }
@@ -357,6 +367,29 @@ void MainWindow::updateDetails(const QModelIndex &proxyIndex)
         entry->lastModified, QLocale::ShortFormat);
     details += QStringLiteral("\n\nPath:\n");
     details += entry->absolutePath;
+
+    detailsLabel_->setText(details);
+}
+
+void MainWindow::updateTreeDetails(const QModelIndex &index)
+{
+    const DiskLens::StorageNode *node = storageTreeModel_->nodeAt(index);
+    if (!node)
+    {
+        detailsLabel_->setText(QStringLiteral("No item selected"));
+        return;
+    }
+
+    const QString size = node->entry.isSymbolicLink ? QStringLiteral("—") : QLocale().formattedDataSize(node->totalSizeBytes);
+
+    QString details = QStringLiteral("Name: %1\nSize: %2").arg(node->entry.name, size);
+
+    if (node->entry.isDirectory && !node->entry.isSymbolicLink)
+    {
+        details += QStringLiteral("\nFiles: %1").arg(QLocale().toString(static_cast<qlonglong>(node->fileCount)));
+    }
+
+    details += QStringLiteral("\n\nPath:\n%1").arg(node->entry.absolutePath);
 
     detailsLabel_->setText(details);
 }

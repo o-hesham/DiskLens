@@ -27,6 +27,7 @@ namespace DiskLens
         QVariant headerData(int section, Qt::Orientation orientation, int role = Qt::DisplayRole) const override;
 
         void setRoot(const StorageNode *root);
+        [[nodiscard]] const StorageNode *nodeAt(const QModelIndex &index) const;
 
     private:
         const StorageNode *root_ = nullptr;
