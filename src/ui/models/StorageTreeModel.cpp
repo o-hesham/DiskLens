@@ -76,10 +76,31 @@ namespace DiskLens
 
     QVariant StorageTreeModel::data(const QModelIndex &modelIndex, int role) const
     {
-        if (!root_ || !modelIndex.isValid() || role != Qt::DisplayRole)
+        if (!root_ || !modelIndex.isValid())
             return {};
 
         const auto *node = static_cast<const StorageNode *>(modelIndex.internalPointer());
+
+        if (role == SortRole)
+        {
+            switch (modelIndex.column())
+            {
+            case NameColumn:
+                return node->entry.name;
+
+            case SizeColumn:
+                return node->totalSizeBytes;
+
+            case FileCountColumn:
+                return static_cast<qlonglong>(node->fileCount);
+
+            default:
+                return {};
+            }
+        }
+
+        if (role != Qt::DisplayRole)
+            return {};
 
         switch (modelIndex.column())
         {

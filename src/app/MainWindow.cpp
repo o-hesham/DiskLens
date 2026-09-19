@@ -137,7 +137,15 @@ void MainWindow::setupUi()
     contentTabs_->addTab(storageTreeView_, QStringLiteral("Storage Tree"));
 
     storageTreeModel_ = new DiskLens::StorageTreeModel(this);
-    storageTreeView_->setModel(storageTreeModel_);
+    storageTreeProxyModel_ = new QSortFilterProxyModel(this);
+    storageTreeProxyModel_->setSourceModel(storageTreeModel_);
+    storageTreeProxyModel_->setSortRole(DiskLens::StorageTreeModel::SortRole);
+    storageTreeProxyModel_->setSortCaseSensitivity(Qt::CaseInsensitive);
+
+    storageTreeView_->setModel(storageTreeProxyModel_);
+    storageTreeView_->setSortingEnabled(true);
+    storageTreeView_->sortByColumn(DiskLens::StorageTreeModel::SizeColumn, Qt::DescendingOrder);
+
     storageTreeView_->setSelectionBehavior(QAbstractItemView::SelectRows);
     storageTreeView_->setSelectionMode(QAbstractItemView::SingleSelection);
     storageTreeView_->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -373,7 +381,8 @@ void MainWindow::updateDetails(const QModelIndex &proxyIndex)
 
 void MainWindow::updateTreeDetails(const QModelIndex &index)
 {
-    const DiskLens::StorageNode *node = storageTreeModel_->nodeAt(index);
+    const QModelIndex sourceIndex = storageTreeProxyModel_->mapToSource(index);
+    const DiskLens::StorageNode *node = storageTreeModel_->nodeAt(sourceIndex);
     if (!node)
     {
         detailsLabel_->setText(QStringLiteral("No item selected"));

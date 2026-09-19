@@ -17,6 +17,11 @@ namespace DiskLens
             ColumnCount
         };
 
+        enum Role
+        {
+            SortRole = Qt::UserRole + 1
+        };
+
         explicit StorageTreeModel(QObject *parent = nullptr);
 
         QModelIndex index(int row, int column, const QModelIndex &parent = {}) const override;

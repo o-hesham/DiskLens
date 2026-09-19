@@ -82,13 +82,13 @@ private:
     QTabWidget *contentTabs_ = nullptr;
 
     QTableView *fileTableView_ = nullptr;
+    QSortFilterProxyModel *fileProxyModel_ = nullptr;
     DiskLens::FileTableModel *fileTableModel_ = nullptr;
 
     DiskLens::StorageTree storageTree_;
     DiskLens::StorageTreeModel *storageTreeModel_ = nullptr;
+    QSortFilterProxyModel *storageTreeProxyModel_ = nullptr;
     QTreeView *storageTreeView_ = nullptr;
-
-    QSortFilterProxyModel *fileProxyModel_ = nullptr;
 
     QLineEdit *searchEdit_ = nullptr;
 
