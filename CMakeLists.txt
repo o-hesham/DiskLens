@@ -11,6 +11,12 @@ find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets)
 
 qt_standard_project_setup()
 
+include(CTest)
+
+if(BUILD_TESTING)
+    find_package(Qt6 REQUIRED COMPONENTS Test)
+endif()
+
 file(GLOB_RECURSE DISKLENS_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h"
@@ -40,4 +46,25 @@ if(WIN32 AND DISKLENS_QT_DEPLOY_TOOL)
         COMMENT "Deploying Qt runtime files for DiskLens"
         VERBATIM
     )
+endif()
+
+if(BUILD_TESTING)
+    qt_add_executable(DuplicateFinderTests
+        tests/DuplicateFinderTests.cpp
+        src/core/analysis/DuplicateFinder.cpp
+    )
+
+    target_link_libraries(DuplicateFinderTests PRIVATE
+        Qt6::Core
+        Qt6::Test
+    )
+
+    add_test(NAME DuplicateFinderTests COMMAND DuplicateFinderTests)
+
+    if(WIN32)
+        set_tests_properties(DuplicateFinderTests PROPERTIES
+            ENVIRONMENT_MODIFICATION
+                "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
+        )
+    endif()
 endif()
