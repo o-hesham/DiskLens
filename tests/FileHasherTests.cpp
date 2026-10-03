@@ -60,11 +60,37 @@ private slots:
         DiskLens::CancellationToken token;
         const auto result = DiskLens::FileHasher::hashSample(entry, token);
 
-        const QByteArray sample =
-            contents.left(chunkSize) + contents.right(chunkSize);
+        const QByteArray sample = contents.left(chunkSize) + contents.right(chunkSize);
 
         QCOMPARE(result.status, DiskLens::FileHashStatus::Completed);
         QCOMPARE(result.digest, QCryptographicHash::hash(sample, QCryptographicHash::Sha256));
+    }
+
+    void hashesEntireFile()
+    {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+
+        constexpr qsizetype chunkSize = 64 * 1024;
+
+        const QByteArray contents = QByteArray(chunkSize, 'A') + QByteArray(chunkSize, 'B') + QByteArray(chunkSize, 'C') + QByteArray(17, 'D');
+
+        QFile file(directory.filePath("large.bin"));
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        QCOMPARE(file.write(contents), qint64(contents.size()));
+        QVERIFY(file.flush());
+        file.close();
+
+        DiskLens::FileEntry entry;
+        entry.absolutePath = file.fileName();
+        entry.sizeBytes = contents.size();
+        entry.lastModified = QFileInfo(file).lastModified();
+
+        DiskLens::CancellationToken token;
+        const auto result = DiskLens::FileHasher::hashFull(entry, token);
+
+        QCOMPARE(result.status, DiskLens::FileHashStatus::Completed);
+        QCOMPARE(result.digest, QCryptographicHash::hash(contents, QCryptographicHash::Sha256));
     }
 
     void respectsCancellationBeforeOpening()
@@ -75,10 +101,14 @@ private slots:
         token.requestCancellation();
 
         const auto result = DiskLens::FileHasher::hashSample(entry, token);
-
         QCOMPARE(result.status, DiskLens::FileHashStatus::Cancelled);
         QVERIFY(result.digest.isEmpty());
         QVERIFY(result.errorMessage.isEmpty());
+
+        const auto fullResult = DiskLens::FileHasher::hashFull(entry, token);
+        QCOMPARE(fullResult.status, DiskLens::FileHashStatus::Cancelled);
+        QVERIFY(fullResult.digest.isEmpty());
+        QVERIFY(fullResult.errorMessage.isEmpty());
     }
 
     void rejectsFileChangedSinceScan()
@@ -107,11 +137,16 @@ private slots:
         file.close();
 
         DiskLens::CancellationToken token;
-        const auto result = DiskLens::FileHasher::hashSample(entry, token);
 
+        const auto result = DiskLens::FileHasher::hashSample(entry, token);
         QCOMPARE(result.status, DiskLens::FileHashStatus::Failed);
         QVERIFY(result.digest.isEmpty());
         QVERIFY(!result.errorMessage.isEmpty());
+
+        const auto fullResult = DiskLens::FileHasher::hashFull(entry, token);
+        QCOMPARE(fullResult.status, DiskLens::FileHashStatus::Failed);
+        QVERIFY(fullResult.digest.isEmpty());
+        QVERIFY(!fullResult.errorMessage.isEmpty());
     }
 };
 

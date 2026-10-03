@@ -7,6 +7,8 @@
 namespace DiskLens
 {
 
+    // Hash the first and last 64 KiB to quickly filter duplicate candidates.
+    // Files up to 128 KiB are hashed completely once.
     FileHashResult FileHasher::hashSample(const FileEntry &entry, const CancellationToken &cancellationToken)
     {
         if (cancellationToken.isCancellationRequested())
@@ -64,6 +66,54 @@ namespace DiskLens
             return {FileHashStatus::Failed, {}, QStringLiteral("File changed while sampling")};
 
         return {FileHashStatus::Completed, QCryptographicHash::hash(contents, QCryptographicHash::Sha256), {}};
+    }
+
+    // Hash every byte of the file in chunks to check full-content matches.
+    FileHashResult FileHasher::hashFull(const FileEntry &entry, const CancellationToken &cancellationToken)
+    {
+        if (cancellationToken.isCancellationRequested())
+            return {FileHashStatus::Cancelled, {}, {}};
+
+        QFile file(entry.absolutePath);
+        if (!file.open(QIODevice::ReadOnly))
+            return {FileHashStatus::Failed, {}, file.errorString()};
+
+        QFileInfo info(file);
+
+        if (info.size() != entry.sizeBytes || info.lastModified() != entry.lastModified)
+            return {FileHashStatus::Failed, {}, QStringLiteral("File changed since the scan")};
+
+        if (entry.sizeBytes <= 0)
+            return {FileHashStatus::Failed, {}, QStringLiteral("Expected a non-empty file")};
+
+        QCryptographicHash hash(QCryptographicHash::Sha256);
+        constexpr qint64 chunkSize = 64 * 1024;
+        qint64 remaining = entry.sizeBytes;
+
+        while (remaining > 0)
+        {
+            if (cancellationToken.isCancellationRequested())
+                return {FileHashStatus::Cancelled, {}, {}};
+
+            const qint64 requested = qMin(chunkSize, remaining);
+            const QByteArray chunk = file.read(requested);
+
+            if (chunk.size() != requested || file.error() != QFileDevice::NoError)
+                return {FileHashStatus::Failed, {}, QStringLiteral("Could not read the complete file")};
+
+            hash.addData(chunk);
+            remaining -= chunk.size();
+        }
+
+        if (cancellationToken.isCancellationRequested())
+            return {FileHashStatus::Cancelled, {}, {}};
+
+        info.refresh();
+
+        if (!info.exists() || info.size() != entry.sizeBytes || info.lastModified() != entry.lastModified)
+            return {FileHashStatus::Failed, {}, QStringLiteral("File changed while hashing")};
+
+        return {FileHashStatus::Completed, hash.result(), {}};
     }
 
 } // namespace DiskLens

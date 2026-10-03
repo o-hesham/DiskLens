@@ -11,6 +11,8 @@ namespace DiskLens
     {
     public:
         [[nodiscard]] static FileHashResult hashSample(const FileEntry &entry, const CancellationToken &cancellationToken);
+
+        [[nodiscard]] static FileHashResult hashFull(const FileEntry &entry, const CancellationToken &cancellationToken);
     };
 
 } // namespace DiskLens
