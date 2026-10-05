@@ -73,8 +73,20 @@ if(BUILD_TESTING)
 
     add_test(NAME FileHasherTests COMMAND FileHasherTests)
 
+    qt_add_executable(FileComparerTests
+    tests/FileComparerTests.cpp
+    src/core/analysis/FileComparer.cpp
+    )
+
+    target_link_libraries(FileComparerTests PRIVATE
+    Qt6::Core
+    Qt6::Test
+    )
+
+    add_test(NAME FileComparerTests COMMAND FileComparerTests)
+
     if(WIN32)
-        set_tests_properties(DuplicateFinderTests FileHasherTests PROPERTIES
+        set_tests_properties(DuplicateFinderTests FileHasherTests FileComparerTests PROPERTIES
         ENVIRONMENT_MODIFICATION
         "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
     )
