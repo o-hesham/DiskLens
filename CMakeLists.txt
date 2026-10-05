@@ -52,43 +52,55 @@ if(BUILD_TESTING)
     qt_add_executable(DuplicateFinderTests
         tests/DuplicateFinderTests.cpp
         src/core/analysis/DuplicateFinder.cpp
-    )
+)
 
     target_link_libraries(DuplicateFinderTests PRIVATE
         Qt6::Core
         Qt6::Test
-    )
+)
 
     add_test(NAME DuplicateFinderTests COMMAND DuplicateFinderTests)
 
     qt_add_executable(FileHasherTests
     tests/FileHasherTests.cpp
     src/core/analysis/FileHasher.cpp
-    )
+)
 
     target_link_libraries(FileHasherTests PRIVATE
     Qt6::Core
     Qt6::Test
-    )
+)
 
     add_test(NAME FileHasherTests COMMAND FileHasherTests)
 
     qt_add_executable(FileComparerTests
     tests/FileComparerTests.cpp
     src/core/analysis/FileComparer.cpp
-    )
+)
 
     target_link_libraries(FileComparerTests PRIVATE
     Qt6::Core
     Qt6::Test
-    )
+)
 
     add_test(NAME FileComparerTests COMMAND FileComparerTests)
 
+    qt_add_executable(FileIdentityTests
+    tests/FileIdentityTests.cpp
+    src/core/filesystem/FileIdentity.cpp
+)
+
+    target_link_libraries(FileIdentityTests PRIVATE
+    Qt6::Core
+    Qt6::Test
+)
+
+    add_test(NAME FileIdentityTests COMMAND FileIdentityTests)
+
     if(WIN32)
-        set_tests_properties(DuplicateFinderTests FileHasherTests FileComparerTests PROPERTIES
+        set_tests_properties(DuplicateFinderTests FileHasherTests FileComparerTests FileIdentityTests PROPERTIES
         ENVIRONMENT_MODIFICATION
         "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
-    )
+)
     endif()
 endif()
