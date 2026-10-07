@@ -105,19 +105,31 @@ private slots:
         DiskLens::FileEntry stale = current;
         stale.lastModified = current.lastModified.addSecs(-10);
 
+        QFile otherFile(directory.filePath("other.txt"));
+        QVERIFY(otherFile.open(QIODevice::WriteOnly));
+        QCOMPARE(otherFile.write(contents), qint64(contents.size()));
+        QVERIFY(otherFile.flush());
+        otherFile.close();
+
+        DiskLens::FileEntry other = current;
+        other.absolutePath = otherFile.fileName();
+        other.lastModified = QFileInfo(otherFile).lastModified();
+        QVERIFY(other.lastModified.isValid());
+
         DiskLens::CancellationToken token;
 
-        const auto firstResult =
-            DiskLens::FileComparer::compare(stale, current, token);
+        const auto firstResult = DiskLens::FileComparer::compare(stale, other, token);
 
         QCOMPARE(firstResult.status, DiskLens::FileComparisonStatus::Failed);
         QVERIFY(!firstResult.errorMessage.isEmpty());
 
-        const auto secondResult =
-            DiskLens::FileComparer::compare(current, stale, token);
+        const auto secondResult = DiskLens::FileComparer::compare(other, stale, token);
 
         QCOMPARE(secondResult.status, DiskLens::FileComparisonStatus::Failed);
         QVERIFY(!secondResult.errorMessage.isEmpty());
+
+        QCOMPARE(firstResult.failedPath, stale.absolutePath);
+        QCOMPARE(secondResult.failedPath, stale.absolutePath);
     }
 };
 

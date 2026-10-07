@@ -50,8 +50,11 @@ endif()
 
 if(BUILD_TESTING)
     qt_add_executable(DuplicateFinderTests
-        tests/DuplicateFinderTests.cpp
-        src/core/analysis/DuplicateFinder.cpp
+    tests/DuplicateFinderTests.cpp
+    src/core/analysis/DuplicateFinder.cpp
+    src/core/analysis/FileHasher.cpp
+    src/core/analysis/FileComparer.cpp
+    src/core/filesystem/FileIdentity.cpp
 )
 
     target_link_libraries(DuplicateFinderTests PRIVATE

@@ -17,8 +17,15 @@ namespace DiskLens
             return info.isFile() && !info.isSymbolicLink() && entry.sizeBytes > 0 && info.size() == entry.sizeBytes && info.lastModified() == entry.lastModified;
         };
 
-        if (!matchesScan(first) || !matchesScan(second))
-            return {FileComparisonStatus::Failed, QStringLiteral("File missing, changed, or ineligible")};
+        if (!matchesScan(first))
+            return {FileComparisonStatus::Failed,
+                    QStringLiteral("File missing, changed, or ineligible"),
+                    first.absolutePath};
+
+        if (!matchesScan(second))
+            return {FileComparisonStatus::Failed,
+                    QStringLiteral("File missing, changed, or ineligible"),
+                    second.absolutePath};
 
         if (first.sizeBytes != second.sizeBytes)
             return {FileComparisonStatus::Different, {}};
@@ -27,10 +34,10 @@ namespace DiskLens
         QFile secondFile{second.absolutePath};
 
         if (!firstFile.open(QIODevice::ReadOnly))
-            return {FileComparisonStatus::Failed, firstFile.errorString()};
+            return {FileComparisonStatus::Failed, firstFile.errorString(), first.absolutePath};
 
         if (!secondFile.open(QIODevice::ReadOnly))
-            return {FileComparisonStatus::Failed, secondFile.errorString()};
+            return {FileComparisonStatus::Failed, secondFile.errorString(), second.absolutePath};
 
         constexpr qint64 chunkSize = 64 * 1024;
         qint64 remaining = first.sizeBytes;
@@ -45,8 +52,11 @@ namespace DiskLens
             const QByteArray firstChunk = firstFile.read(requested);
             const QByteArray secondChunk = secondFile.read(requested);
 
-            if (firstChunk.size() != requested || secondChunk.size() != requested || firstFile.error() != QFileDevice::NoError || secondFile.error() != QFileDevice::NoError)
-                return {FileComparisonStatus::Failed, QStringLiteral("Could not read comparison chunks")};
+            if (firstChunk.size() != requested || firstFile.error() != QFileDevice::NoError)
+                return {FileComparisonStatus::Failed, QStringLiteral("Could not read comparison chunk"), first.absolutePath};
+
+            if (secondChunk.size() != requested || secondFile.error() != QFileDevice::NoError)
+                return {FileComparisonStatus::Failed, QStringLiteral("Could not read comparison chunk"), second.absolutePath};
 
             if (firstChunk != secondChunk)
             {
@@ -60,9 +70,11 @@ namespace DiskLens
         if (cancellationToken.isCancellationRequested())
             return {FileComparisonStatus::Cancelled, {}};
 
-        if (!matchesScan(first) || !matchesScan(second))
-            return {FileComparisonStatus::Failed,
-                    QStringLiteral("File changed while comparing")};
+        if (!matchesScan(first))
+            return {FileComparisonStatus::Failed, QStringLiteral("File changed while comparing"), first.absolutePath};
+
+        if (!matchesScan(second))
+            return {FileComparisonStatus::Failed, QStringLiteral("File changed while comparing"), second.absolutePath};
 
         return {equal ? FileComparisonStatus::Equal : FileComparisonStatus::Different, {}};
     }

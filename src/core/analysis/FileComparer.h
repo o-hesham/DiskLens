@@ -20,6 +20,7 @@ namespace DiskLens
     {
         FileComparisonStatus status = FileComparisonStatus::Failed;
         QString errorMessage;
+        QString failedPath;
     };
 
     class FileComparer final

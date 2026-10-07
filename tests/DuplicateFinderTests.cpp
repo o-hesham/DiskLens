@@ -1,6 +1,11 @@
 #include "../src/core/analysis/DuplicateFinder.h"
 
 #include <QtTest/QtTest>
+#include <QCryptographicHash>
+#include <QFile>
+#include <QFileInfo>
+#include <QTemporaryDir>
+#include <filesystem>
 
 class DuplicateFinderTests final : public QObject
 {
@@ -50,6 +55,225 @@ private slots:
                 {file, directory, symlink, empty, empty});
 
         QVERIFY(groups.isEmpty());
+    }
+
+    void identicalFilesFormOneGroup()
+    {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+
+        const QByteArray contents("identical contents");
+        QVector<DiskLens::FileEntry> entries;
+
+        for (const auto &name :
+             {QStringLiteral("first.bin"), QStringLiteral("second.bin")})
+        {
+            QFile file(directory.filePath(name));
+            QVERIFY(file.open(QIODevice::WriteOnly));
+            QCOMPARE(file.write(contents), qint64(contents.size()));
+            QVERIFY(file.flush());
+            file.close();
+
+            DiskLens::FileEntry entry;
+            entry.absolutePath = file.fileName();
+            entry.name = name;
+            entry.sizeBytes = contents.size();
+            entry.lastModified = QFileInfo(file).lastModified();
+            entries.append(entry);
+        }
+
+        DiskLens::CancellationToken token;
+        const auto result = DiskLens::DuplicateFinder::findDuplicates(entries, token);
+
+        QCOMPARE(result.status, DiskLens::DuplicateStatus::Completed);
+        QCOMPARE(result.groups.size(), qsizetype{1});
+
+        const auto &group = result.groups.first();
+        QCOMPARE(group.files.size(), qsizetype{2});
+        QCOMPARE(group.sizeBytes, qint64(contents.size()));
+        QCOMPARE(group.digest, QCryptographicHash::hash(contents, QCryptographicHash::Sha256));
+        QCOMPARE(result.ignoredHardLinkAliases, qsizetype{0});
+        QVERIFY(result.issues.isEmpty());
+        QVERIFY(result.errorMessage.isEmpty());
+    }
+
+    void collapsesHardLinkAliases()
+    {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+
+        const QString originalPath = directory.filePath("original.bin");
+        const QString aliasPath = directory.filePath("alias.bin");
+
+        QFile file(originalPath);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        QCOMPARE(file.write(QByteArray("data")), qint64{4});
+        QVERIFY(file.flush());
+        file.close();
+
+        std::error_code error;
+        std::filesystem::create_hard_link(
+            QFileInfo(originalPath).filesystemFilePath(),
+            QFileInfo(aliasPath).filesystemFilePath(),
+            error);
+
+        if (error == std::errc::operation_not_supported ||
+            error == std::errc::function_not_supported)
+            QSKIP("Hard links are unsupported on this test filesystem");
+
+        QVERIFY2(!error, error.message().c_str());
+
+        QVector<DiskLens::FileEntry> entries;
+
+        for (const auto &path : {originalPath, aliasPath})
+        {
+            const QFileInfo info(path);
+            DiskLens::FileEntry entry;
+            entry.absolutePath = path;
+            entry.sizeBytes = info.size();
+            entry.lastModified = info.lastModified();
+            entries.append(entry);
+        }
+
+        DiskLens::CancellationToken token;
+        const auto result =
+            DiskLens::DuplicateFinder::findDuplicates(entries, token);
+
+        QCOMPARE(result.status, DiskLens::DuplicateStatus::Completed);
+        QVERIFY(result.groups.isEmpty());
+        QCOMPARE(result.ignoredHardLinkAliases, qsizetype{1});
+        QVERIFY(result.issues.isEmpty());
+        QVERIFY(result.errorMessage.isEmpty());
+
+        const QString copyPath = directory.filePath("copy.bin");
+        QVERIFY(QFile::copy(originalPath, copyPath));
+
+        const QFileInfo copyInfo(copyPath);
+        DiskLens::FileEntry copy;
+        copy.absolutePath = copyPath;
+        copy.sizeBytes = copyInfo.size();
+        copy.lastModified = copyInfo.lastModified();
+        entries.append(copy);
+
+        const auto withCopy =
+            DiskLens::DuplicateFinder::findDuplicates(entries, token);
+
+        QCOMPARE(withCopy.status, DiskLens::DuplicateStatus::Completed);
+        QCOMPARE(withCopy.groups.size(), qsizetype{1});
+
+        const auto &group = withCopy.groups.first();
+        QCOMPARE(group.files.size(), qsizetype{2});
+        QCOMPARE(group.sizeBytes, qint64{4});
+        QCOMPARE(group.ignoredHardLinkAliases, qsizetype{1});
+        QCOMPARE(withCopy.ignoredHardLinkAliases, qsizetype{1});
+        QVERIFY(withCopy.issues.isEmpty());
+        QVERIFY(withCopy.errorMessage.isEmpty());
+    }
+
+    void respectsCancellationBeforeAnalysis()
+    {
+        DiskLens::CancellationToken token;
+        token.requestCancellation();
+
+        const auto result =
+            DiskLens::DuplicateFinder::findDuplicates({}, token);
+
+        QCOMPARE(result.status, DiskLens::DuplicateStatus::Cancelled);
+        QVERIFY(result.groups.isEmpty());
+        QVERIFY(result.issues.isEmpty());
+        QCOMPARE(result.ignoredHardLinkAliases, qsizetype{0});
+        QVERIFY(result.errorMessage.isEmpty());
+    }
+
+    void matchingSamplesDoNotProveDuplicates()
+    {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+
+        QVector<DiskLens::FileEntry> entries;
+
+        for (const auto &name :
+             {QStringLiteral("first.bin"), QStringLiteral("second.bin")})
+        {
+            QByteArray contents(3 * 64 * 1024, 'A');
+
+            // Change only a middle byte in the second file.
+            if (entries.size() == 1)
+                contents[64 * 1024] = 'B';
+
+            QFile file(directory.filePath(name));
+            QVERIFY(file.open(QIODevice::WriteOnly));
+            QCOMPARE(file.write(contents), qint64(contents.size()));
+            QVERIFY(file.flush());
+            file.close();
+
+            const QFileInfo info(file);
+            DiskLens::FileEntry entry;
+            entry.absolutePath = file.fileName();
+            entry.sizeBytes = info.size();
+            entry.lastModified = info.lastModified();
+            entries.append(entry);
+        }
+
+        DiskLens::CancellationToken token;
+        const auto result =
+            DiskLens::DuplicateFinder::findDuplicates(entries, token);
+
+        QCOMPARE(result.status, DiskLens::DuplicateStatus::Completed);
+        QVERIFY(result.groups.isEmpty());
+        QVERIFY(result.issues.isEmpty());
+        QCOMPARE(result.ignoredHardLinkAliases, qsizetype{0});
+        QVERIFY(result.errorMessage.isEmpty());
+    }
+
+    void skipsMissingFileAndFindsRemainingCopies()
+    {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+
+        const QByteArray contents("identical contents");
+        QVector<DiskLens::FileEntry> entries;
+
+        for (const auto &name :
+             {QStringLiteral("first.bin"), QStringLiteral("second.bin"), QStringLiteral("third.bin")})
+        {
+            QFile file(directory.filePath(name));
+            QVERIFY(file.open(QIODevice::WriteOnly));
+            QCOMPARE(file.write(contents), qint64(contents.size()));
+            QVERIFY(file.flush());
+            file.close();
+
+            DiskLens::FileEntry entry;
+            entry.absolutePath = file.fileName();
+            entry.name = name;
+            entry.sizeBytes = contents.size();
+            entry.lastModified = QFileInfo(file).lastModified();
+            entries.append(entry);
+        }
+
+        // Remove one temporary file after recording its scan metadata.
+        const QString missingPath = entries.first().absolutePath;
+        QVERIFY(QFile::remove(missingPath));
+
+        DiskLens::CancellationToken token;
+        const auto result = DiskLens::DuplicateFinder::findDuplicates(entries, token);
+
+        QCOMPARE(result.status, DiskLens::DuplicateStatus::Completed);
+        QCOMPARE(result.groups.size(), qsizetype{1});
+
+        const auto &group = result.groups.first();
+        QCOMPARE(group.files.size(), qsizetype{2});
+        QCOMPARE(group.sizeBytes, qint64(contents.size()));
+        QCOMPARE(group.digest, QCryptographicHash::hash(contents, QCryptographicHash::Sha256));
+        QCOMPARE(result.ignoredHardLinkAliases, qsizetype{0});
+        QCOMPARE(result.issues.size(), qsizetype{1});
+        QCOMPARE(result.issues.first().absolutePath, missingPath);
+        QVERIFY(!result.issues.first().message.isEmpty());
+
+        for (const auto &entry : group.files)
+            QVERIFY(entry.absolutePath != missingPath);
+
+        QVERIFY(result.errorMessage.isEmpty());
     }
 };
 
