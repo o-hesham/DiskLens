@@ -273,6 +273,8 @@ private slots:
         for (const auto &entry : group.files)
             QVERIFY(entry.absolutePath != missingPath);
 
+        QCOMPARE(result.issues.first().kind, DiskLens::DuplicateIssueKind::Missing);
+
         QVERIFY(result.errorMessage.isEmpty());
     }
 };

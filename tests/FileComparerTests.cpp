@@ -130,6 +130,52 @@ private slots:
 
         QCOMPARE(firstResult.failedPath, stale.absolutePath);
         QCOMPARE(secondResult.failedPath, stale.absolutePath);
+
+        QCOMPARE(firstResult.issueKind, DiskLens::DuplicateIssueKind::Changed);
+        QCOMPARE(secondResult.issueKind, DiskLens::DuplicateIssueKind::Changed);
+    }
+
+    void reportsMissingFileInEitherPosition()
+    {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+
+        QFile file(directory.filePath("existing.bin"));
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        QCOMPARE(file.write(QByteArray("data")), qint64{4});
+        QVERIFY(file.flush());
+        file.close();
+
+        const QFileInfo info(file.fileName());
+
+        DiskLens::FileEntry existing;
+        existing.absolutePath = info.absoluteFilePath();
+        existing.sizeBytes = info.size();
+        existing.lastModified = info.lastModified();
+        QVERIFY(existing.lastModified.isValid());
+
+        DiskLens::FileEntry missing = existing;
+        missing.absolutePath = directory.filePath("missing.bin");
+
+        QVERIFY(QFile::copy(existing.absolutePath, missing.absolutePath));
+        missing.lastModified = QFileInfo(missing.absolutePath).lastModified();
+        QVERIFY(missing.lastModified.isValid());
+        QVERIFY(QFile::remove(missing.absolutePath));
+
+        DiskLens::CancellationToken token;
+
+        for (bool missingFirst : {true, false})
+        {
+            const auto result = DiskLens::FileComparer::compare(
+                missingFirst ? missing : existing,
+                missingFirst ? existing : missing,
+                token);
+
+            QCOMPARE(result.status, DiskLens::FileComparisonStatus::Failed);
+            QCOMPARE(result.issueKind, DiskLens::DuplicateIssueKind::Missing);
+            QCOMPARE(result.failedPath, missing.absolutePath);
+            QVERIFY(!result.errorMessage.isEmpty());
+        }
     }
 };
 

@@ -1,8 +1,10 @@
 #include "FileHasher.h"
+#include "FileIssueClassifier.h"
 
 #include <QCryptographicHash>
 #include <QFile>
 #include <QFileInfo>
+#include <filesystem>
 
 namespace DiskLens
 {
@@ -16,13 +18,21 @@ namespace DiskLens
 
         QFile file(entry.absolutePath);
         if (!file.open(QIODevice::ReadOnly))
-            return {FileHashStatus::Failed, {}, file.errorString()};
+        {
+            std::error_code error;
+            const bool exists = std::filesystem::exists(
+                QFileInfo(entry.absolutePath).filesystemFilePath(), error);
+
+            const auto kind = !error && !exists ? DuplicateIssueKind::Missing : DuplicateIssueKind::Unreadable;
+
+            return {FileHashStatus::Failed, {}, file.errorString(), kind};
+        }
 
         QFileInfo info(file);
 
         // Reject files whose size or modification time changed since the scan.
         if (info.size() != entry.sizeBytes || info.lastModified() != entry.lastModified)
-            return {FileHashStatus::Failed, {}, QStringLiteral("File changed since the scan")};
+            return {FileHashStatus::Failed, {}, QStringLiteral("File changed since the scan"), DuplicateIssueKind::Changed};
 
         const qint64 size = file.size();
         constexpr qint64 chunkSize = 64 * 1024;
@@ -38,14 +48,18 @@ namespace DiskLens
             return {FileHashStatus::Cancelled, {}, {}};
 
         if (contents.size() != firstReadSize || file.error() != QFileDevice::NoError)
-            return {FileHashStatus::Failed, {}, QStringLiteral("Could not read the first sample")};
+            return {FileHashStatus::Failed, {}, QStringLiteral("Could not read the first sample"), classifyFileFailure(entry)};
 
         // Read the last 64 KiB of a large file.
         if (size > 2 * chunkSize)
         {
             // Move the file’s read position to 64 KiB before its end.
             if (!file.seek(size - chunkSize))
-                return {FileHashStatus::Failed, {}, file.errorString()};
+                return {
+                    FileHashStatus::Failed,
+                    {},
+                    file.errorString(),
+                    classifyFileFailure(entry)};
 
             const QByteArray tail = file.read(chunkSize);
 
@@ -53,7 +67,7 @@ namespace DiskLens
                 return {FileHashStatus::Cancelled, {}, {}};
 
             if (tail.size() != chunkSize || file.error() != QFileDevice::NoError)
-                return {FileHashStatus::Failed, {}, QStringLiteral("Could not read the last sample")};
+                return {FileHashStatus::Failed, {}, QStringLiteral("Could not read the last sample"), classifyFileFailure(entry)};
 
             contents.append(tail);
         }
@@ -62,8 +76,19 @@ namespace DiskLens
         // while their contents were being sampled.
         info.refresh();
 
-        if (!info.exists() || info.size() != entry.sizeBytes || info.lastModified() != entry.lastModified)
-            return {FileHashStatus::Failed, {}, QStringLiteral("File changed while sampling")};
+        if (!info.exists() || !info.lastModified().isValid())
+            return {
+                FileHashStatus::Failed,
+                {},
+                QStringLiteral("Could not validate file after reading"),
+                classifyFileFailure(entry)};
+
+        if (info.size() != entry.sizeBytes || info.lastModified() != entry.lastModified)
+            return {
+                FileHashStatus::Failed,
+                {},
+                QStringLiteral("File changed while reading"),
+                DuplicateIssueKind::Changed};
 
         return {FileHashStatus::Completed, QCryptographicHash::hash(contents, QCryptographicHash::Sha256), {}};
     }
@@ -76,12 +101,26 @@ namespace DiskLens
 
         QFile file(entry.absolutePath);
         if (!file.open(QIODevice::ReadOnly))
-            return {FileHashStatus::Failed, {}, file.errorString()};
+        {
+            std::error_code error;
+            const bool exists = std::filesystem::exists(
+                QFileInfo(entry.absolutePath).filesystemFilePath(), error);
+
+            const auto kind = !error && !exists
+                                  ? DuplicateIssueKind::Missing
+                                  : DuplicateIssueKind::Unreadable;
+
+            return {FileHashStatus::Failed, {}, file.errorString(), kind};
+        }
 
         QFileInfo info(file);
 
         if (info.size() != entry.sizeBytes || info.lastModified() != entry.lastModified)
-            return {FileHashStatus::Failed, {}, QStringLiteral("File changed since the scan")};
+            return {
+                FileHashStatus::Failed,
+                {},
+                QStringLiteral("File changed since the scan"),
+                DuplicateIssueKind::Changed};
 
         if (entry.sizeBytes <= 0)
             return {FileHashStatus::Failed, {}, QStringLiteral("Expected a non-empty file")};
@@ -99,7 +138,7 @@ namespace DiskLens
             const QByteArray chunk = file.read(requested);
 
             if (chunk.size() != requested || file.error() != QFileDevice::NoError)
-                return {FileHashStatus::Failed, {}, QStringLiteral("Could not read the complete file")};
+                return {FileHashStatus::Failed, {}, QStringLiteral("Could not read the complete file"), classifyFileFailure(entry)};
 
             hash.addData(chunk);
             remaining -= chunk.size();
@@ -110,8 +149,19 @@ namespace DiskLens
 
         info.refresh();
 
-        if (!info.exists() || info.size() != entry.sizeBytes || info.lastModified() != entry.lastModified)
-            return {FileHashStatus::Failed, {}, QStringLiteral("File changed while hashing")};
+        if (!info.exists() || !info.lastModified().isValid())
+            return {
+                FileHashStatus::Failed,
+                {},
+                QStringLiteral("Could not validate file after reading"),
+                classifyFileFailure(entry)};
+
+        if (info.size() != entry.sizeBytes || info.lastModified() != entry.lastModified)
+            return {
+                FileHashStatus::Failed,
+                {},
+                QStringLiteral("File changed while reading"),
+                DuplicateIssueKind::Changed};
 
         return {FileHashStatus::Completed, hash.result(), {}};
     }

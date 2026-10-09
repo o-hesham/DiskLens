@@ -62,7 +62,7 @@ namespace DiskLens
 
                 if (hash.status == FileHashStatus::Failed)
                 {
-                    result.issues.append({entry.absolutePath, DuplicateIssueKind::Other, hash.errorMessage});
+                    result.issues.append({entry.absolutePath, hash.issueKind, hash.errorMessage});
 
                     continue;
                 }
@@ -96,7 +96,7 @@ namespace DiskLens
 
                 if (hash.status == FileHashStatus::Failed)
                 {
-                    result.issues.append({entry.absolutePath, DuplicateIssueKind::Other, hash.errorMessage});
+                    result.issues.append({entry.absolutePath, hash.issueKind, hash.errorMessage});
 
                     continue;
                 }
@@ -135,7 +135,7 @@ namespace DiskLens
 
                     if (comparison.status == FileComparisonStatus::Failed)
                     {
-                        result.issues.append({comparison.failedPath, DuplicateIssueKind::Other, comparison.errorMessage});
+                        result.issues.append({comparison.failedPath, comparison.issueKind, comparison.errorMessage});
 
                         pending.removeIf([&](const FileEntry &file)
                                          { return file.absolutePath == comparison.failedPath; });

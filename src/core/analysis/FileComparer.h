@@ -2,6 +2,7 @@
 
 #include "../filesystem/FileEntry.h"
 #include "../jobs/CancellationToken.h"
+#include "DuplicateIssueKind.h"
 
 #include <QString>
 
@@ -21,6 +22,7 @@ namespace DiskLens
         FileComparisonStatus status = FileComparisonStatus::Failed;
         QString errorMessage;
         QString failedPath;
+        DuplicateIssueKind issueKind = DuplicateIssueKind::Other;
     };
 
     class FileComparer final

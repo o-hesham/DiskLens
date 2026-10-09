@@ -140,11 +140,13 @@ private slots:
 
         const auto result = DiskLens::FileHasher::hashSample(entry, token);
         QCOMPARE(result.status, DiskLens::FileHashStatus::Failed);
+        QCOMPARE(result.issueKind, DiskLens::DuplicateIssueKind::Changed);
         QVERIFY(result.digest.isEmpty());
         QVERIFY(!result.errorMessage.isEmpty());
 
         const auto fullResult = DiskLens::FileHasher::hashFull(entry, token);
         QCOMPARE(fullResult.status, DiskLens::FileHashStatus::Failed);
+        QCOMPARE(fullResult.issueKind, DiskLens::DuplicateIssueKind::Changed);
         QVERIFY(fullResult.digest.isEmpty());
         QVERIFY(!fullResult.errorMessage.isEmpty());
     }

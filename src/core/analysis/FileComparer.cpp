@@ -1,4 +1,5 @@
 #include "FileComparer.h"
+#include "FileIssueClassifier.h"
 
 #include <QFile>
 #include <QFileInfo>
@@ -18,14 +19,18 @@ namespace DiskLens
         };
 
         if (!matchesScan(first))
-            return {FileComparisonStatus::Failed,
-                    QStringLiteral("File missing, changed, or ineligible"),
-                    first.absolutePath};
+            return {
+                FileComparisonStatus::Failed,
+                QStringLiteral("File missing, changed, or ineligible"),
+                first.absolutePath,
+                classifyFileFailure(first)};
 
         if (!matchesScan(second))
-            return {FileComparisonStatus::Failed,
-                    QStringLiteral("File missing, changed, or ineligible"),
-                    second.absolutePath};
+            return {
+                FileComparisonStatus::Failed,
+                QStringLiteral("File missing, changed, or ineligible"),
+                second.absolutePath,
+                classifyFileFailure(second)};
 
         if (first.sizeBytes != second.sizeBytes)
             return {FileComparisonStatus::Different, {}};
@@ -34,10 +39,10 @@ namespace DiskLens
         QFile secondFile{second.absolutePath};
 
         if (!firstFile.open(QIODevice::ReadOnly))
-            return {FileComparisonStatus::Failed, firstFile.errorString(), first.absolutePath};
+            return {FileComparisonStatus::Failed, firstFile.errorString(), first.absolutePath, classifyFileFailure(first)};
 
         if (!secondFile.open(QIODevice::ReadOnly))
-            return {FileComparisonStatus::Failed, secondFile.errorString(), second.absolutePath};
+            return {FileComparisonStatus::Failed, secondFile.errorString(), second.absolutePath, classifyFileFailure(second)};
 
         constexpr qint64 chunkSize = 64 * 1024;
         qint64 remaining = first.sizeBytes;
@@ -53,10 +58,10 @@ namespace DiskLens
             const QByteArray secondChunk = secondFile.read(requested);
 
             if (firstChunk.size() != requested || firstFile.error() != QFileDevice::NoError)
-                return {FileComparisonStatus::Failed, QStringLiteral("Could not read comparison chunk"), first.absolutePath};
+                return {FileComparisonStatus::Failed, QStringLiteral("Could not read comparison chunk"), first.absolutePath, classifyFileFailure(first)};
 
             if (secondChunk.size() != requested || secondFile.error() != QFileDevice::NoError)
-                return {FileComparisonStatus::Failed, QStringLiteral("Could not read comparison chunk"), second.absolutePath};
+                return {FileComparisonStatus::Failed, QStringLiteral("Could not read comparison chunk"), second.absolutePath, classifyFileFailure(second)};
 
             if (firstChunk != secondChunk)
             {
@@ -71,10 +76,10 @@ namespace DiskLens
             return {FileComparisonStatus::Cancelled, {}};
 
         if (!matchesScan(first))
-            return {FileComparisonStatus::Failed, QStringLiteral("File changed while comparing"), first.absolutePath};
+            return {FileComparisonStatus::Failed, QStringLiteral("Could not validate file after comparing"), first.absolutePath, classifyFileFailure(first)};
 
         if (!matchesScan(second))
-            return {FileComparisonStatus::Failed, QStringLiteral("File changed while comparing"), second.absolutePath};
+            return {FileComparisonStatus::Failed, QStringLiteral("Could not validate file after comparing"), second.absolutePath, classifyFileFailure(second)};
 
         return {equal ? FileComparisonStatus::Equal : FileComparisonStatus::Different, {}};
     }

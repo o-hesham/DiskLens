@@ -1,6 +1,7 @@
 #pragma once
 
 #include "DuplicateGroup.h"
+#include "DuplicateIssueKind.h"
 
 #include <QString>
 #include <QVector>
@@ -13,16 +14,6 @@ namespace DiskLens
         Completed,
         Cancelled,
         Failed
-    };
-
-    // Categorizes the problem that caused a file to be skipped.
-    enum class DuplicateIssueKind
-    {
-        Missing,
-        Unreadable,
-        Changed,
-        IdentityCheckFailed, // Its physical identity could not be established.
-        Other
     };
 
     // Records one file-specific problem without failing the whole analysis.

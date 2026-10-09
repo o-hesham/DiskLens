@@ -1,5 +1,7 @@
 #pragma once
 
+#include "DuplicateIssueKind.h"
+
 #include <QByteArray>
 #include <QString>
 
@@ -18,6 +20,7 @@ namespace DiskLens
         FileHashStatus status = FileHashStatus::Failed;
         QByteArray digest;
         QString errorMessage;
+        DuplicateIssueKind issueKind = DuplicateIssueKind::Other;
     };
 
 } // namespace DiskLens
