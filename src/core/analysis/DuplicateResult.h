@@ -5,6 +5,7 @@
 
 #include <QString>
 #include <QVector>
+#include <QMetaType>
 
 namespace DiskLens
 {
@@ -35,3 +36,5 @@ namespace DiskLens
     };
 
 } // namespace DiskLens
+
+Q_DECLARE_METATYPE(DiskLens::DuplicateResult);

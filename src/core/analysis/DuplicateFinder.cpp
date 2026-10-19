@@ -33,7 +33,7 @@ namespace DiskLens
         return groups;
     }
 
-    DuplicateResult DuplicateFinder::findDuplicates(const QVector<FileEntry> &entries, const CancellationToken &cancellationToken)
+    DuplicateResult DuplicateFinder::findDuplicates(const QVector<FileEntry> &entries, const CancellationToken &cancellationToken, const ProgressCallback &progressCallback)
     {
         DuplicateResult result;
 
@@ -43,8 +43,45 @@ namespace DiskLens
             return result;
         }
 
+        DuplicateProgress progress;
+        progress.totalOperations = entries.size();
+
+        const auto reportProgress = [&]()
+        {
+            if (progressCallback)
+                progressCallback(progress);
+
+            return !cancellationToken.isCancellationRequested();
+        };
+
+        if (!reportProgress())
+        {
+            result.status = DuplicateStatus::Cancelled;
+            return result;
+        }
+
         const auto sizeCandidates = findSizeCandidates(entries);
+
+        progress.completedOperations = entries.size();
+
+        if (!reportProgress())
+        {
+            result.status = DuplicateStatus::Cancelled;
+            return result;
+        }
+
         QVector<DuplicateCandidateGroup> sampleCandidates;
+
+        progress = {DuplicatePhase::SampleHashing, {}, 0, 0};
+
+        for (const auto &group : sizeCandidates)
+            progress.totalOperations += group.files.size();
+
+        if (!reportProgress())
+        {
+            result.status = DuplicateStatus::Cancelled;
+            return result;
+        }
 
         for (const auto &sizeGroup : sizeCandidates)
         {
@@ -53,8 +90,24 @@ namespace DiskLens
 
             for (const auto &entry : sizeGroup.files)
             {
+                progress.currentPath = entry.absolutePath;
+
+                if (!reportProgress())
+                {
+                    result.status = DuplicateStatus::Cancelled;
+                    return result;
+                }
+
                 const auto hash = FileHasher::hashSample(entry, cancellationToken);
                 if (hash.status == FileHashStatus::Cancelled)
+                {
+                    result.status = DuplicateStatus::Cancelled;
+                    return result;
+                }
+
+                ++progress.completedOperations;
+
+                if (!reportProgress())
                 {
                     result.status = DuplicateStatus::Cancelled;
                     return result;
@@ -81,14 +134,41 @@ namespace DiskLens
 
         QVector<DuplicateGroup> fullCandidates;
 
+        progress = {DuplicatePhase::FullHashing, {}, 0, 0};
+
+        for (const auto &group : sampleCandidates)
+            progress.totalOperations += group.files.size();
+
+        if (!reportProgress())
+        {
+            result.status = DuplicateStatus::Cancelled;
+            return result;
+        }
+
         for (const auto &sampleGroup : sampleCandidates)
         {
             QMap<QByteArray, QVector<FileEntry>> filesByFullHash;
 
             for (const auto &entry : sampleGroup.files)
             {
+                progress.currentPath = entry.absolutePath;
+
+                if (!reportProgress())
+                {
+                    result.status = DuplicateStatus::Cancelled;
+                    return result;
+                }
+
                 const auto hash = FileHasher::hashFull(entry, cancellationToken);
                 if (hash.status == FileHashStatus::Cancelled)
+                {
+                    result.status = DuplicateStatus::Cancelled;
+                    return result;
+                }
+
+                ++progress.completedOperations;
+
+                if (!reportProgress())
                 {
                     result.status = DuplicateStatus::Cancelled;
                     return result;
@@ -113,6 +193,14 @@ namespace DiskLens
 
         QVector<DuplicateGroup> verifiedCandidates;
 
+        progress = {DuplicatePhase::ByteComparison, {}, 0, -1};
+
+        if (!reportProgress())
+        {
+            result.status = DuplicateStatus::Cancelled;
+            return result;
+        }
+
         for (const auto &fullGroup : fullCandidates)
         {
             auto pending = fullGroup.files;
@@ -125,9 +213,25 @@ namespace DiskLens
 
                 for (qsizetype i = 1; i < pending.size(); ++i)
                 {
+                    progress.currentPath = pending.at(i).absolutePath;
+
+                    if (!reportProgress())
+                    {
+                        result.status = DuplicateStatus::Cancelled;
+                        return result;
+                    }
+
                     const auto comparison = FileComparer::compare(reference, pending.at(i), cancellationToken);
 
                     if (comparison.status == FileComparisonStatus::Cancelled)
+                    {
+                        result.status = DuplicateStatus::Cancelled;
+                        return result;
+                    }
+
+                    ++progress.completedOperations;
+
+                    if (!reportProgress())
                     {
                         result.status = DuplicateStatus::Cancelled;
                         return result;
@@ -162,6 +266,14 @@ namespace DiskLens
 
         QVector<DuplicateGroup> confirmedGroups;
 
+        progress = {DuplicatePhase::HardLinkChecking, {}, 0, -1};
+
+        if (!reportProgress())
+        {
+            result.status = DuplicateStatus::Cancelled;
+            return result;
+        }
+
         for (const auto &verified : verifiedCandidates)
         {
             DuplicateGroup distinct{verified.sizeBytes, verified.digest, {}, 0};
@@ -173,7 +285,9 @@ namespace DiskLens
 
                 for (const auto &existing : distinct.files)
                 {
-                    if (cancellationToken.isCancellationRequested())
+                    progress.currentPath = entry.absolutePath;
+
+                    if (!reportProgress())
                     {
                         result.status = DuplicateStatus::Cancelled;
                         return result;
@@ -181,6 +295,14 @@ namespace DiskLens
 
                     std::error_code error;
                     const bool sameFile = referToSameFile(entry.absolutePath, existing.absolutePath, error);
+
+                    ++progress.completedOperations;
+
+                    if (!reportProgress())
+                    {
+                        result.status = DuplicateStatus::Cancelled;
+                        return result;
+                    }
 
                     if (error)
                     {

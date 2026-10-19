@@ -1,6 +1,7 @@
 #include "MainWindow.h"
 #include "AppVersion.h"
 #include "../core/jobs/ScanJob.h"
+#include "../core/jobs/DuplicateJob.h"
 #include "../ui/models/FileTableModel.h"
 #include "../ui/models/StorageTreeModel.h"
 
@@ -26,12 +27,17 @@
 #include <QTimer>
 #include <QTabWidget>
 #include <QTreeView>
+#include <QStringList>
+#include <QFileInfo>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
 {
     setWindowTitle(QStringLiteral("%1 %2").arg(QString::fromUtf8(DiskLens::kAppName), QString::fromUtf8(DiskLens::kAppVersion)));
     resize(1100, 700);
+
+    qRegisterMetaType<DiskLens::DuplicateProgress>();
+    qRegisterMetaType<DiskLens::DuplicateResult>();
 
     setupUi();
 }
@@ -41,10 +47,19 @@ MainWindow::~MainWindow()
     if (cancellationToken_)
         cancellationToken_->requestCancellation();
 
+    if (duplicateCancellationToken_)
+        duplicateCancellationToken_->requestCancellation();
+
     if (scanThread_ && scanThread_->isRunning())
     {
         scanThread_->quit();
         scanThread_->wait();
+    }
+
+    if (duplicateThread_)
+    {
+        duplicateThread_->quit();
+        duplicateThread_->wait();
     }
 }
 
@@ -62,13 +77,16 @@ void MainWindow::setupUi()
     selectFolderAction_ = mainToolBar_->addAction(QStringLiteral("Select Folder"));
     startScanAction_ = mainToolBar_->addAction(QStringLiteral("Start Scan"));
     cancelScanAction_ = mainToolBar_->addAction(QStringLiteral("Cancel Scan"));
+    findDuplicatesAction_ = mainToolBar_->addAction(QStringLiteral("Find Duplicates"));
 
     fileMenu_->addAction(selectFolderAction_);
     scanMenu_->addAction(startScanAction_);
     scanMenu_->addAction(cancelScanAction_);
+    scanMenu_->addAction(findDuplicatesAction_);
 
     startScanAction_->setEnabled(false);
     cancelScanAction_->setEnabled(false);
+    findDuplicatesAction_->setEnabled(false);
 
     auto *centralWidget = new QWidget(this);
 
@@ -204,11 +222,12 @@ void MainWindow::setupUi()
             updateDetails(fileTableView_->currentIndex());
         else
             updateTreeDetails(storageTreeView_->currentIndex()); });
+    connect(findDuplicatesAction_, &QAction::triggered, this, &MainWindow::startDuplicateAnalysis);
 }
 
 void MainWindow::startScan()
 {
-    if (scanThread_)
+    if (scanThread_ || duplicateThread_)
         return;
 
     const auto *selectedItem = locationsList_->currentItem();
@@ -217,6 +236,11 @@ void MainWindow::startScan()
         statusLabel_->setText(QStringLiteral("Select a folder first"));
         return;
     }
+
+    findDuplicatesAction_->setEnabled(false);
+    hasCompletedScan_ = false;
+    scanEntries_.clear();
+    duplicateResult_ = {};
 
     cancellationToken_ = std::make_shared<DiskLens::CancellationToken>();
 
@@ -261,9 +285,10 @@ void MainWindow::startScan()
             {
         scanThread_ = nullptr;
         scanJob_ = nullptr;
-        cancellationToken_.reset(); 
-    
-        startScanAction_->setEnabled(locationsList_->count() > 0); });
+        cancellationToken_.reset();
+
+        startScanAction_->setEnabled(locationsList_->count() > 0);
+        findDuplicatesAction_->setEnabled(hasCompletedScan_ && !scanEntries_.isEmpty() && !duplicateThread_); });
 
     // Safely delete the thread object after it stops.
     connect(scanThread_, &QThread::finished, scanThread_, &QObject::deleteLater);
@@ -273,17 +298,21 @@ void MainWindow::startScan()
 
 void MainWindow::cancelScan()
 {
-    if (!cancellationToken_)
+    const auto token = duplicateThread_ ? duplicateCancellationToken_ : cancellationToken_;
+    if (!token)
         return;
 
-    cancellationToken_->requestCancellation();
-
+    token->requestCancellation();
     cancelScanAction_->setEnabled(false);
     statusLabel_->setText(QStringLiteral("Cancelling..."));
 }
 
 void MainWindow::handleScanFinished(const DiskLens::ScanResult &result)
 {
+    hasCompletedScan_ = result.status == DiskLens::ScanStatus::Completed;
+
+    scanEntries_ = hasCompletedScan_ ? result.entries : QVector<DiskLens::FileEntry>{};
+
     cancelScanAction_->setEnabled(false);
 
     storageTreeModel_->setRoot(nullptr);
@@ -401,4 +430,93 @@ void MainWindow::updateTreeDetails(const QModelIndex &index)
     details += QStringLiteral("\n\nPath:\n%1").arg(node->entry.absolutePath);
 
     detailsLabel_->setText(details);
+}
+
+void MainWindow::startDuplicateAnalysis()
+{
+    if (scanThread_ || duplicateThread_ || !hasCompletedScan_ || scanEntries_.isEmpty())
+        return;
+
+    duplicateCancellationToken_ = std::make_shared<DiskLens::CancellationToken>();
+
+    duplicateThread_ = new QThread(this);
+    duplicateJob_ = new DiskLens::DuplicateJob(scanEntries_, duplicateCancellationToken_);
+    duplicateJob_->moveToThread(duplicateThread_);
+
+    findDuplicatesAction_->setEnabled(false);
+    startScanAction_->setEnabled(false);
+    selectFolderAction_->setEnabled(false);
+    cancelScanAction_->setEnabled(true);
+    statusLabel_->setText(QStringLiteral("Analyzing duplicates..."));
+
+    connect(duplicateThread_, &QThread::started, duplicateJob_, &DiskLens::DuplicateJob::run);
+    connect(duplicateJob_, &DiskLens::DuplicateJob::progressChanged, this, &MainWindow::handleDuplicateProgress, Qt::QueuedConnection);
+    connect(duplicateJob_, &DiskLens::DuplicateJob::finished, this, &MainWindow::handleDuplicateFinished, Qt::QueuedConnection);
+    connect(duplicateJob_, &DiskLens::DuplicateJob::finished, duplicateThread_, &QThread::quit, Qt::DirectConnection);
+    connect(duplicateThread_, &QThread::finished, duplicateJob_, &QObject::deleteLater);
+    connect(duplicateThread_, &QObject::destroyed, this, [this]()
+            {
+        duplicateThread_ = nullptr;
+        duplicateJob_ = nullptr;
+        duplicateCancellationToken_.reset();
+
+        selectFolderAction_->setEnabled(true);
+        startScanAction_->setEnabled(
+            !scanThread_ && locationsList_->count() > 0);
+        findDuplicatesAction_->setEnabled(
+            !scanThread_ && hasCompletedScan_ && !scanEntries_.isEmpty()); });
+    connect(duplicateThread_, &QThread::finished, duplicateThread_, &QObject::deleteLater);
+
+    duplicateThread_->start();
+}
+
+void MainWindow::handleDuplicateProgress(const DiskLens::DuplicateProgress &progress)
+{
+    if (duplicateCancellationToken_ && duplicateCancellationToken_->isCancellationRequested())
+        return;
+
+    static const QStringList phases{
+        QStringLiteral("Grouping by size"),
+        QStringLiteral("Hashing samples"),
+        QStringLiteral("Hashing full files"),
+        QStringLiteral("Comparing contents"),
+        QStringLiteral("Checking hard links")};
+
+    const QString phase = phases.value(static_cast<int>(progress.phase));
+
+    QString message =
+        progress.totalOperations >= 0
+            ? QStringLiteral("%1: %2/%3").arg(phase).arg(progress.completedOperations).arg(progress.totalOperations)
+            : QStringLiteral("%1: %2 operations").arg(phase).arg(progress.completedOperations);
+
+    if (!progress.currentPath.isEmpty())
+        message += QStringLiteral(" - %1").arg(QFileInfo(progress.currentPath).fileName());
+
+    statusLabel_->setText(message);
+}
+
+void MainWindow::handleDuplicateFinished(const DiskLens::DuplicateResult &result)
+{
+    cancelScanAction_->setEnabled(false);
+
+    if (result.status == DiskLens::DuplicateStatus::Cancelled)
+    {
+        statusLabel_->setText(QStringLiteral("Duplicate analysis cancelled"));
+
+        return;
+    }
+
+    if (result.status == DiskLens::DuplicateStatus::Failed)
+    {
+        statusLabel_->setText(QStringLiteral("Duplicate analysis failed: %1").arg(result.errorMessage));
+
+        return;
+    }
+
+    duplicateResult_ = result;
+
+    statusLabel_->setText(
+        QStringLiteral("Analysis complete: %1 duplicate groups, %2 issues")
+            .arg(result.groups.size())
+            .arg(result.issues.size()));
 }

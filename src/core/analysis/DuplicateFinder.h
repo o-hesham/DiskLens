@@ -3,6 +3,9 @@
 #include "DuplicateCandidateGroup.h"
 #include "DuplicateResult.h"
 #include "../jobs/CancellationToken.h"
+#include "DuplicateProgress.h"
+
+#include <functional>
 
 namespace DiskLens
 {
@@ -11,7 +14,10 @@ namespace DiskLens
     {
     public:
         [[nodiscard]] static QVector<DuplicateCandidateGroup> findSizeCandidates(const QVector<FileEntry> &entries);
-        [[nodiscard]] static DuplicateResult findDuplicates(const QVector<FileEntry> &entries, const CancellationToken &cancellationToken);
+
+        using ProgressCallback = std::function<void(const DuplicateProgress &)>;
+
+        [[nodiscard]] static DuplicateResult findDuplicates(const QVector<FileEntry> &entries, const CancellationToken &cancellationToken, const ProgressCallback &progressCallback = {});
     };
 
 } // namespace DiskLens

@@ -82,8 +82,15 @@ private slots:
             entries.append(entry);
         }
 
+        QVector<DiskLens::DuplicateProgress> updates;
         DiskLens::CancellationToken token;
-        const auto result = DiskLens::DuplicateFinder::findDuplicates(entries, token);
+
+        const auto result = DiskLens::DuplicateFinder::findDuplicates(
+            entries, token,
+            [&](const DiskLens::DuplicateProgress &progress)
+            {
+                updates.append(progress);
+            });
 
         QCOMPARE(result.status, DiskLens::DuplicateStatus::Completed);
         QCOMPARE(result.groups.size(), qsizetype{1});
@@ -95,6 +102,29 @@ private slots:
         QCOMPARE(result.ignoredHardLinkAliases, qsizetype{0});
         QVERIFY(result.issues.isEmpty());
         QVERIFY(result.errorMessage.isEmpty());
+
+        const QVector<qint64> expectedCounts{0, 0, 1, 1, 2};
+
+        for (auto phase : {DiskLens::DuplicatePhase::SampleHashing,
+                           DiskLens::DuplicatePhase::FullHashing})
+        {
+            QVector<DiskLens::DuplicateProgress> phaseUpdates;
+            for (const auto &update : updates)
+                if (update.phase == phase)
+                    phaseUpdates.append(update);
+
+            QCOMPARE(phaseUpdates.size(), expectedCounts.size());
+
+            for (qsizetype i = 0; i < phaseUpdates.size(); ++i)
+            {
+                QCOMPARE(phaseUpdates.at(i).totalOperations, qint64{2});
+                QCOMPARE(phaseUpdates.at(i).completedOperations, expectedCounts.at(i));
+
+                const QString expectedPath = i == 0 ? QString{} : entries.at((i - 1) / 2).absolutePath;
+
+                QCOMPARE(phaseUpdates.at(i).currentPath, expectedPath);
+            }
+        }
     }
 
     void collapsesHardLinkAliases()
@@ -276,6 +306,63 @@ private slots:
         QCOMPARE(result.issues.first().kind, DiskLens::DuplicateIssueKind::Missing);
 
         QVERIFY(result.errorMessage.isEmpty());
+    }
+
+    void reportsSizeGroupingProgress()
+    {
+        // Synthetic directory metadata; no filesystem access needed.
+        QVector<DiskLens::FileEntry> entries(2);
+        for (auto &entry : entries)
+            entry.isDirectory = true;
+
+        QVector<DiskLens::DuplicateProgress> updates;
+        DiskLens::CancellationToken token;
+
+        const auto result = DiskLens::DuplicateFinder::findDuplicates(
+            entries, token,
+            [&](const DiskLens::DuplicateProgress &progress)
+            {
+                if (progress.phase == DiskLens::DuplicatePhase::SizeGrouping)
+                    updates.append(progress);
+            });
+
+        QCOMPARE(result.status, DiskLens::DuplicateStatus::Completed);
+        QVERIFY(result.groups.isEmpty());
+        QVERIFY(result.issues.isEmpty());
+        QCOMPARE(updates.size(), qsizetype{2});
+
+        QCOMPARE(updates.first().completedOperations, qint64{0});
+        QCOMPARE(updates.last().completedOperations, qint64{2});
+
+        for (const auto &update : updates)
+        {
+            QCOMPARE(update.totalOperations, qint64{2});
+            QVERIFY(update.currentPath.isEmpty());
+        }
+    }
+
+    void respectsCancellationFromProgressCallback()
+    {
+        for (int cancelAt : {1, 2})
+        {
+            DiskLens::CancellationToken token;
+            int callbackCount = 0;
+
+            const auto result = DiskLens::DuplicateFinder::findDuplicates(
+                {}, token,
+                [&](const DiskLens::DuplicateProgress &)
+                {
+                    ++callbackCount;
+                    if (callbackCount == cancelAt)
+                        token.requestCancellation();
+                });
+
+            QCOMPARE(result.status, DiskLens::DuplicateStatus::Cancelled);
+            QCOMPARE(callbackCount, cancelAt);
+            QVERIFY(result.groups.isEmpty());
+            QVERIFY(result.issues.isEmpty());
+            QVERIFY(result.errorMessage.isEmpty());
+        }
     }
 };
 

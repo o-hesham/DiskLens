@@ -1,6 +1,8 @@
 #pragma once
 
 #include "../core/analysis/StorageTree.h"
+#include "../core/analysis/DuplicateProgress.h"
+#include "../core/analysis/DuplicateResult.h"
 
 #include <QMainWindow>
 
@@ -29,6 +31,7 @@ namespace DiskLens
     class CancellationToken;
     class FileTableModel;
     class StorageTreeModel;
+    class DuplicateJob;
     struct ScanResult;
 
 } // namespace DiskLens
@@ -51,6 +54,10 @@ private:
     void updateDetails(const QModelIndex &proxyIndex);
     void updateTreeDetails(const QModelIndex &index);
 
+    void startDuplicateAnalysis();
+    void handleDuplicateProgress(const DiskLens::DuplicateProgress &progress);
+    void handleDuplicateFinished(const DiskLens::DuplicateResult &result);
+
     QMenu *fileMenu_ = nullptr;
     QMenu *scanMenu_ = nullptr;
     QMenu *viewMenu_ = nullptr;
@@ -61,6 +68,7 @@ private:
     QAction *selectFolderAction_ = nullptr;
     QAction *startScanAction_ = nullptr;
     QAction *cancelScanAction_ = nullptr;
+    QAction *findDuplicatesAction_ = nullptr;
 
     QSplitter *mainSplitter_ = nullptr;
 
@@ -78,6 +86,14 @@ private:
     QThread *scanThread_ = nullptr;
     DiskLens::ScanJob *scanJob_ = nullptr;
     std::shared_ptr<DiskLens::CancellationToken> cancellationToken_;
+
+    QThread *duplicateThread_ = nullptr;
+    DiskLens::DuplicateJob *duplicateJob_ = nullptr;
+    std::shared_ptr<DiskLens::CancellationToken> duplicateCancellationToken_;
+
+    QVector<DiskLens::FileEntry> scanEntries_;
+    bool hasCompletedScan_ = false;
+    DiskLens::DuplicateResult duplicateResult_;
 
     QTabWidget *contentTabs_ = nullptr;
 
