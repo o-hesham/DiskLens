@@ -29,6 +29,7 @@
 #include <QTreeView>
 #include <QStringList>
 #include <QFileInfo>
+#include <QStandardItemModel>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -168,6 +169,22 @@ void MainWindow::setupUi()
     storageTreeView_->setSelectionMode(QAbstractItemView::SingleSelection);
     storageTreeView_->setEditTriggers(QAbstractItemView::NoEditTriggers);
 
+    duplicatesModel_ = new QStandardItemModel(this);
+    duplicatesModel_->setHorizontalHeaderLabels({QStringLiteral("Group / File"), QStringLiteral("Size"), QStringLiteral("Path")});
+
+    duplicatesTreeView_ = new QTreeView(contentTabs_);
+    duplicatesTreeView_->setModel(duplicatesModel_);
+    duplicatesTreeView_->setAlternatingRowColors(true);
+    duplicatesTreeView_->setUniformRowHeights(true);
+    duplicatesTreeView_->setSelectionBehavior(QAbstractItemView::SelectRows);
+    duplicatesTreeView_->setSelectionMode(QAbstractItemView::SingleSelection);
+    duplicatesTreeView_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    duplicatesTreeView_->setColumnWidth(0, 240);
+    duplicatesTreeView_->setColumnWidth(1, 100);
+
+    const int duplicatesTab = contentTabs_->addTab(duplicatesTreeView_, QStringLiteral("Duplicates"));
+    contentTabs_->setTabEnabled(duplicatesTab, false);
+
     contentTabs_->hide();
     contentLayout->addWidget(contentTabs_);
 
@@ -218,11 +235,18 @@ void MainWindow::setupUi()
     connect(storageTreeView_->selectionModel(), &QItemSelectionModel::currentRowChanged, this, &MainWindow::updateTreeDetails);
     connect(contentTabs_, &QTabWidget::currentChanged, this, [this](int tabIndex)
             {
-        if(contentTabs_->widget(tabIndex) == fileTableView_)
+            const auto *page = contentTabs_->widget(tabIndex);
+
+        if(page == fileTableView_)
             updateDetails(fileTableView_->currentIndex());
+        else if (page == storageTreeView_)
+            updateTreeDetails(storageTreeView_->currentIndex());
+        else if (page == duplicatesTreeView_)
+            updateDuplicateDetails(duplicatesTreeView_->currentIndex());
         else
-            updateTreeDetails(storageTreeView_->currentIndex()); });
+                detailsLabel_->setText(QStringLiteral("No file selected")); });
     connect(findDuplicatesAction_, &QAction::triggered, this, &MainWindow::startDuplicateAnalysis);
+    connect(duplicatesTreeView_->selectionModel(), QItemSelectionModel::currentRowChanged, this, &MainWindow::updateDuplicateDetails);
 }
 
 void MainWindow::startScan()
@@ -241,6 +265,10 @@ void MainWindow::startScan()
     hasCompletedScan_ = false;
     scanEntries_.clear();
     duplicateResult_ = {};
+
+    contentTabs_->setCurrentWidget(fileTableView_);
+    contentTabs_->setTabEnabled(contentTabs_->indexOf(duplicatesTreeView_), false);
+    duplicatesModel_->removeRows(0, duplicatesModel_->rowCount());
 
     cancellationToken_ = std::make_shared<DiskLens::CancellationToken>();
 
@@ -515,8 +543,57 @@ void MainWindow::handleDuplicateFinished(const DiskLens::DuplicateResult &result
 
     duplicateResult_ = result;
 
+    duplicatesModel_->removeRows(0, duplicatesModel_->rowCount());
+
+    for (qsizetype groupIndex = 0; groupIndex < result.groups.size(); ++groupIndex)
+    {
+        const auto &group = result.groups.at(groupIndex);
+
+        auto *groupItem = new QStandardItem(QStringLiteral("Group %1 (%2 copies)").arg(groupIndex + 1).arg(group.files.size()));
+
+        duplicatesModel_->appendRow(
+            {groupItem,
+             new QStandardItem(QStringLiteral("%1 each").arg(QLocale().formattedDataSize(group.sizeBytes))),
+             new QStandardItem()});
+
+        for (const auto &file : group.files)
+        {
+            groupItem->appendRow(
+                {new QStandardItem(QFileInfo(file.absolutePath).fileName()),
+                 new QStandardItem(
+                     QLocale().formattedDataSize(file.sizeBytes)),
+                 new QStandardItem(file.absolutePath)});
+        }
+    }
+
+    if (result.groups.isEmpty())
+    {
+        auto *message = new QStandardItem(QStringLiteral("No duplicate files found"));
+        message->setFlags(Qt::NoItemFlags);
+        duplicatesModel_->appendRow(message);
+    }
+
+    contentTabs_->setTabEnabled(contentTabs_->indexOf(duplicatesTreeView_), true);
+    contentTabs_->setCurrentWidget(duplicatesTreeView_);
+
     statusLabel_->setText(
         QStringLiteral("Analysis complete: %1 duplicate groups, %2 issues")
             .arg(result.groups.size())
             .arg(result.issues.size()));
+}
+
+void MainWindow::updateDuplicateDetails(const QModelIndex &index)
+{
+    if (!index.isValid() || !index.parent().isValid())
+    {
+        detailsLabel_->setText(QStringLiteral("Select a file within a duplicate group"));
+
+        return;
+    }
+
+    const QString name = index.siblingAtColumn(0).data().toString();
+    const QString size = index.siblingAtColumn(1).data().toString();
+    const QString path = index.siblingAtColumn(2).data().toString();
+
+    detailsLabel_->setText(QStringLiteral("Name: %1\nSize: %2\n\nPath:\n%3").arg(name, size, path));
 }

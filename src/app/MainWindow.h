@@ -24,6 +24,7 @@ class QLineEdit;
 class QTimer;
 class QTabWidget;
 class QTreeView;
+class QStandardItemModel;
 
 namespace DiskLens
 {
@@ -57,6 +58,8 @@ private:
     void startDuplicateAnalysis();
     void handleDuplicateProgress(const DiskLens::DuplicateProgress &progress);
     void handleDuplicateFinished(const DiskLens::DuplicateResult &result);
+
+    void updateDuplicateDetails(const QModelIndex &index);
 
     QMenu *fileMenu_ = nullptr;
     QMenu *scanMenu_ = nullptr;
@@ -105,6 +108,9 @@ private:
     DiskLens::StorageTreeModel *storageTreeModel_ = nullptr;
     QSortFilterProxyModel *storageTreeProxyModel_ = nullptr;
     QTreeView *storageTreeView_ = nullptr;
+
+    QTreeView *duplicatesTreeView_ = nullptr;
+    QStandardItemModel *duplicatesModel_ = nullptr;
 
     QLineEdit *searchEdit_ = nullptr;
 
