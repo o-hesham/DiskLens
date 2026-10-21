@@ -110,6 +110,7 @@ private:
     QTreeView *storageTreeView_ = nullptr;
 
     QTreeView *duplicatesTreeView_ = nullptr;
+    QSortFilterProxyModel *duplicatesProxyModel_ = nullptr;
     QStandardItemModel *duplicatesModel_ = nullptr;
 
     QLineEdit *searchEdit_ = nullptr;

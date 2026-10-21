@@ -172,8 +172,14 @@ void MainWindow::setupUi()
     duplicatesModel_ = new QStandardItemModel(this);
     duplicatesModel_->setHorizontalHeaderLabels({QStringLiteral("Group / File"), QStringLiteral("Size"), QStringLiteral("Path")});
 
+    duplicatesProxyModel_ = new QSortFilterProxyModel(this);
+    duplicatesProxyModel_->setSourceModel(duplicatesModel_);
+    duplicatesProxyModel_->setFilterKeyColumn(-1);
+    duplicatesProxyModel_->setFilterCaseSensitivity(Qt::CaseInsensitive);
+    duplicatesProxyModel_->setRecursiveFilteringEnabled(true);
+
     duplicatesTreeView_ = new QTreeView(contentTabs_);
-    duplicatesTreeView_->setModel(duplicatesModel_);
+    duplicatesTreeView_->setModel(duplicatesProxyModel_);
     duplicatesTreeView_->setAlternatingRowColors(true);
     duplicatesTreeView_->setUniformRowHeights(true);
     duplicatesTreeView_->setSelectionBehavior(QAbstractItemView::SelectRows);
@@ -231,7 +237,15 @@ void MainWindow::setupUi()
     connect(searchEdit_, &QLineEdit::textChanged, this, [this]()
             { searchTimer_->start(); });
     connect(searchTimer_, &QTimer::timeout, this, [this]()
-            { fileProxyModel_->setFilterFixedString(searchEdit_->text()); });
+            {
+                const QString query = searchEdit_->text();
+                fileProxyModel_->setFilterFixedString(query);
+                duplicatesProxyModel_->setFilterFixedString(query);
+
+                if (!query.isEmpty())
+                {
+                    duplicatesTreeView_->expandAll();
+                } });
     connect(storageTreeView_->selectionModel(), &QItemSelectionModel::currentRowChanged, this, &MainWindow::updateTreeDetails);
     connect(contentTabs_, &QTabWidget::currentChanged, this, [this](int tabIndex)
             {
