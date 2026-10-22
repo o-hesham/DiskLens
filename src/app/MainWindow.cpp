@@ -261,6 +261,51 @@ void MainWindow::setupUi()
                 detailsLabel_->setText(QStringLiteral("No file selected")); });
     connect(findDuplicatesAction_, &QAction::triggered, this, &MainWindow::startDuplicateAnalysis);
     connect(duplicatesTreeView_->selectionModel(), QItemSelectionModel::currentRowChanged, this, &MainWindow::updateDuplicateDetails);
+    connect(duplicatesModel_, &QStandardItemModel::itemChanged, this, [this](QStandardItem *item)
+            {
+                if (!item->isCheckable())
+                    return;
+
+                auto *group = item->parent();
+                if (group && item->checkState() == Qt::Checked)
+                {
+                    bool allChecked = true;
+                    for (int row = 0; row < group->rowCount(); ++row)
+                    {
+                        if (group->child(row, 0)->checkState() != Qt::Checked)
+                        {
+                            allChecked = false;
+                            break;
+                        }
+                    }
+
+                    if (allChecked)
+                    {
+                        item->setCheckState(Qt::Unchecked);
+                        statusLabel_->setText(QStringLiteral("Keep at least one copy in each group."));
+                        return;
+                    }
+                }
+
+                int markedCount = 0;
+                quint64 markedBytes = 0;
+
+                for (int groupRow = 0; groupRow < duplicatesModel_->rowCount(); ++groupRow)
+                {
+                    auto *groupItem = duplicatesModel_->item(groupRow, 0);
+                    for (int fileRow = 0; fileRow < groupItem->rowCount(); ++fileRow)
+                    {
+                        auto *fileItem = groupItem->child(fileRow, 0);
+                        if (fileItem->checkState() == Qt::Checked)
+                        {
+                            ++markedCount;
+                            markedBytes += fileItem->data(Qt::UserRole).toULongLong();
+                        }
+                    }
+                }
+
+                const QString tabText = markedCount == 0 ? QStringLiteral("Duplicates") : QStringLiteral("Duplicates (%1 marked, %2)").arg(markedCount).arg(QLocale().formattedDataSize(markedBytes));
+                contentTabs_->setTabText(contentTabs_->indexOf(duplicatesTreeView_), tabText); });
 }
 
 void MainWindow::startScan()
@@ -283,6 +328,8 @@ void MainWindow::startScan()
     contentTabs_->setCurrentWidget(fileTableView_);
     contentTabs_->setTabEnabled(contentTabs_->indexOf(duplicatesTreeView_), false);
     duplicatesModel_->removeRows(0, duplicatesModel_->rowCount());
+
+    contentTabs_->setTabText(contentTabs_->indexOf(duplicatesTreeView_), QStringLiteral("Duplicates"));
 
     cancellationToken_ = std::make_shared<DiskLens::CancellationToken>();
 
@@ -559,6 +606,8 @@ void MainWindow::handleDuplicateFinished(const DiskLens::DuplicateResult &result
 
     duplicatesModel_->removeRows(0, duplicatesModel_->rowCount());
 
+    contentTabs_->setTabText(contentTabs_->indexOf(duplicatesTreeView_), QStringLiteral("Duplicates"));
+
     for (qsizetype groupIndex = 0; groupIndex < result.groups.size(); ++groupIndex)
     {
         const auto &group = result.groups.at(groupIndex);
@@ -572,10 +621,14 @@ void MainWindow::handleDuplicateFinished(const DiskLens::DuplicateResult &result
 
         for (const auto &file : group.files)
         {
+            auto *nameItem = new QStandardItem(QFileInfo(file.absolutePath).fileName());
+            nameItem->setCheckable(true);
+            nameItem->setCheckState(Qt::Unchecked);
+            nameItem->setData(file.sizeBytes, Qt::UserRole);
+
             groupItem->appendRow(
-                {new QStandardItem(QFileInfo(file.absolutePath).fileName()),
-                 new QStandardItem(
-                     QLocale().formattedDataSize(file.sizeBytes)),
+                {nameItem,
+                 new QStandardItem(QLocale().formattedDataSize(file.sizeBytes)),
                  new QStandardItem(file.absolutePath)});
         }
     }
