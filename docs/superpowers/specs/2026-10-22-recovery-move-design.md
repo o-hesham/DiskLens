@@ -48,7 +48,7 @@ Out of scope (slice 2 and later):
 - `execute(record)` handles each item in turn:
   - Run the pre-move check.
   - Create the operation folder.
-  - Call `QDir::rename`. `QFile::rename` is not used because it falls back to copy and remove. Before implementing, confirm against the Qt documentation that `QDir::rename` has no copy fallback and does not overwrite.
+  - Check that the destination does not exist (if it does, the item is `Failed`), then call `std::filesystem::rename` with an `std::error_code`. Paths come from `QFileInfo::filesystemFilePath()`. Neither `QFile::rename` nor `QDir::rename` is used, because the Qt 6 documentation says both fall back to copy and remove when a rename fails. `std::filesystem::rename` never copies, but it may replace an existing target, which is why the existence check comes first. The destination is inside a folder unique to this operation, so nothing else should be writing to it between the check and the rename.
   - Set each item's `status` and `message`.
 
 ### `OperationStore`
@@ -91,7 +91,7 @@ Out of scope (slice 2 and later):
 | The source's size or modified time changed | `Skipped`: "Changed since scan" |
 | No kept copy matches its scan | `Skipped`: "No unchanged copy left to keep" |
 | The recovery folder can't be created on a drive | `Failed` for that drive's items; other drives continue. |
-| The rename fails | `Failed`: "Could not move (in use or access denied)" |
+| The rename fails | `Failed`, with the `std::error_code` message |
 | The destination already exists | `Failed`; the destination is never overwritten. |
 | The second record save fails | A warning is shown; the pre-move record still lists every item. |
 
