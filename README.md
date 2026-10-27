@@ -96,7 +96,3 @@ The `core/` code depends only on Qt Core, so it can be tested without a GUI.
 - Packaging for Windows, then support for other platforms
 
 The full design is in [`docs/superpowers/specs/2026-09-10-disklens-design.md`](docs/superpowers/specs/2026-09-10-disklens-design.md).
-
-## License
-
-No license has been chosen yet, so all rights are reserved by the author. You're welcome to read the code, but please ask before reusing it.
