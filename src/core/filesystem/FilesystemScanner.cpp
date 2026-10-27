@@ -1,4 +1,5 @@
 #include "FilesystemScanner.h"
+#include "../operations/OperationRecord.h"
 
 #include <QDirListing>
 #include <QFileInfo>
@@ -33,6 +34,11 @@ namespace DiskLens
             }
 
             const QFileInfo info = directoryEntry.fileInfo();
+
+            // Skip DiskLens recovery folders and everything inside them.
+            const QString path = info.absoluteFilePath();
+            if (info.fileName() == kRecoveryFolderName || path.contains(QLatin1Char('/') + kRecoveryFolderName + QLatin1Char('/')))
+                continue;
 
             FileEntry entry;
             entry.absolutePath = info.absoluteFilePath();

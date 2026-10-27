@@ -60,6 +60,8 @@ private:
     void handleDuplicateFinished(const DiskLens::DuplicateResult &result);
 
     void updateDuplicateDetails(const QModelIndex &index);
+    void startRecoveryMove();
+    void updateDuplicateMarkSummary();
 
     QMenu *fileMenu_ = nullptr;
     QMenu *scanMenu_ = nullptr;
@@ -72,6 +74,7 @@ private:
     QAction *startScanAction_ = nullptr;
     QAction *cancelScanAction_ = nullptr;
     QAction *findDuplicatesAction_ = nullptr;
+    QAction *moveToRecoveryAction_ = nullptr;
 
     QSplitter *mainSplitter_ = nullptr;
 

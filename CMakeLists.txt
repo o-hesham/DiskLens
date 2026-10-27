@@ -100,8 +100,21 @@ if(BUILD_TESTING)
 
     add_test(NAME FileIdentityTests COMMAND FileIdentityTests)
 
+    qt_add_executable(RecoveryServiceTests
+    tests/RecoveryServiceTests.cpp
+    src/core/operations/RecoveryService.cpp
+    src/core/operations/OperationStore.cpp
+)
+
+    target_link_libraries(RecoveryServiceTests PRIVATE
+    Qt6::Core
+    Qt6::Test
+)
+
+    add_test(NAME RecoveryServiceTests COMMAND RecoveryServiceTests)
+
     if(WIN32)
-        set_tests_properties(DuplicateFinderTests FileHasherTests FileComparerTests FileIdentityTests PROPERTIES
+        set_tests_properties(DuplicateFinderTests FileHasherTests FileComparerTests FileIdentityTests RecoveryServiceTests PROPERTIES
         ENVIRONMENT_MODIFICATION
         "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
 )

@@ -4,6 +4,9 @@
 #include "../core/jobs/DuplicateJob.h"
 #include "../ui/models/FileTableModel.h"
 #include "../ui/models/StorageTreeModel.h"
+#include "../core/operations/RecoveryService.h"
+#include "../ui/dialogs/CleanupPreviewDialog.h"
+#include "../core/operations/OperationStore.h"
 
 #include <QMenuBar>
 #include <QMenu>
@@ -30,6 +33,9 @@
 #include <QStringList>
 #include <QFileInfo>
 #include <QStandardItemModel>
+#include <QSet>
+#include <QApplication>
+#include <QMessageBox>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -79,15 +85,18 @@ void MainWindow::setupUi()
     startScanAction_ = mainToolBar_->addAction(QStringLiteral("Start Scan"));
     cancelScanAction_ = mainToolBar_->addAction(QStringLiteral("Cancel Scan"));
     findDuplicatesAction_ = mainToolBar_->addAction(QStringLiteral("Find Duplicates"));
+    moveToRecoveryAction_ = mainToolBar_->addAction(QStringLiteral("Move Marked to Recovery…"));
 
     fileMenu_->addAction(selectFolderAction_);
     scanMenu_->addAction(startScanAction_);
     scanMenu_->addAction(cancelScanAction_);
     scanMenu_->addAction(findDuplicatesAction_);
+    scanMenu_->addAction(moveToRecoveryAction_);
 
     startScanAction_->setEnabled(false);
     cancelScanAction_->setEnabled(false);
     findDuplicatesAction_->setEnabled(false);
+    moveToRecoveryAction_->setEnabled(false);
 
     auto *centralWidget = new QWidget(this);
 
@@ -261,6 +270,7 @@ void MainWindow::setupUi()
                 detailsLabel_->setText(QStringLiteral("No file selected")); });
     connect(findDuplicatesAction_, &QAction::triggered, this, &MainWindow::startDuplicateAnalysis);
     connect(duplicatesTreeView_->selectionModel(), QItemSelectionModel::currentRowChanged, this, &MainWindow::updateDuplicateDetails);
+    connect(moveToRecoveryAction_, &QAction::triggered, this, &MainWindow::startRecoveryMove);
     connect(duplicatesModel_, &QStandardItemModel::itemChanged, this, [this](QStandardItem *item)
             {
                 if (!item->isCheckable())
@@ -287,25 +297,7 @@ void MainWindow::setupUi()
                     }
                 }
 
-                int markedCount = 0;
-                quint64 markedBytes = 0;
-
-                for (int groupRow = 0; groupRow < duplicatesModel_->rowCount(); ++groupRow)
-                {
-                    auto *groupItem = duplicatesModel_->item(groupRow, 0);
-                    for (int fileRow = 0; fileRow < groupItem->rowCount(); ++fileRow)
-                    {
-                        auto *fileItem = groupItem->child(fileRow, 0);
-                        if (fileItem->checkState() == Qt::Checked)
-                        {
-                            ++markedCount;
-                            markedBytes += fileItem->data(Qt::UserRole).toULongLong();
-                        }
-                    }
-                }
-
-                const QString tabText = markedCount == 0 ? QStringLiteral("Duplicates") : QStringLiteral("Duplicates (%1 marked, %2)").arg(markedCount).arg(QLocale().formattedDataSize(markedBytes));
-                contentTabs_->setTabText(contentTabs_->indexOf(duplicatesTreeView_), tabText); });
+                updateDuplicateMarkSummary(); });
 }
 
 void MainWindow::startScan()
@@ -330,6 +322,8 @@ void MainWindow::startScan()
     duplicatesModel_->removeRows(0, duplicatesModel_->rowCount());
 
     contentTabs_->setTabText(contentTabs_->indexOf(duplicatesTreeView_), QStringLiteral("Duplicates"));
+
+    moveToRecoveryAction_->setEnabled(false);
 
     cancellationToken_ = std::make_shared<DiskLens::CancellationToken>();
 
@@ -608,6 +602,8 @@ void MainWindow::handleDuplicateFinished(const DiskLens::DuplicateResult &result
 
     contentTabs_->setTabText(contentTabs_->indexOf(duplicatesTreeView_), QStringLiteral("Duplicates"));
 
+    moveToRecoveryAction_->setEnabled(false);
+
     for (qsizetype groupIndex = 0; groupIndex < result.groups.size(); ++groupIndex)
     {
         const auto &group = result.groups.at(groupIndex);
@@ -663,4 +659,120 @@ void MainWindow::updateDuplicateDetails(const QModelIndex &index)
     const QString path = index.siblingAtColumn(2).data().toString();
 
     detailsLabel_->setText(QStringLiteral("Name: %1\nSize: %2\n\nPath:\n%3").arg(name, size, path));
+}
+
+void MainWindow::startRecoveryMove()
+{
+    QSet<QString> markedPaths;
+    for (int groupRow = 0; groupRow < duplicatesModel_->rowCount(); ++groupRow)
+    {
+        auto *groupItem = duplicatesModel_->item(groupRow, 0);
+        for (int fileRow = 0; fileRow < groupItem->rowCount(); ++fileRow)
+        {
+            if (groupItem->child(fileRow, 0)->checkState() == Qt::Checked)
+                markedPaths.insert(groupItem->child(fileRow, 2)->text());
+        }
+    }
+
+    DiskLens::RecoveryService recoveryService;
+    auto record = recoveryService.buildPlan(duplicateResult_.groups, markedPaths);
+
+    DiskLens::CleanupPreviewDialog dialog(record, this);
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+
+    const DiskLens::OperationStore store;
+    QString error;
+    if (!store.save(record, &error))
+    {
+        QMessageBox::critical(this, QStringLiteral("Move to Recovery"), QStringLiteral("Could not save the operation record, so nothing was moved.\n\n%1").arg(error));
+
+        return;
+    }
+
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    recoveryService.execute(record);
+    QApplication::restoreOverrideCursor();
+
+    const bool historySaved = store.save(record, &error);
+
+    int moved = 0, skipped = 0, failed = 0;
+    QStringList details;
+    for (const auto &item : record.items)
+    {
+        if (item.status == DiskLens::RecoveryStatus::Moved)
+        {
+            ++moved;
+            continue;
+        }
+
+        ++(item.status == DiskLens::RecoveryStatus::Skipped ? skipped : failed);
+        details.append(QStringLiteral("%1\n    %2").arg(item.originalPath, item.message));
+    }
+
+    QMessageBox results(this);
+    results.setWindowTitle(QStringLiteral("Move to Recovery"));
+    results.setIcon(skipped + failed > 0 || !historySaved ? QMessageBox::Warning : QMessageBox::Information);
+    results.setText(QStringLiteral("Moved %1, skipped %2, failed %3.").arg(moved).arg(skipped).arg(failed));
+    if (!historySaved)
+        results.setInformativeText(QStringLiteral("The operation history could not be updated. %1").arg(error));
+    if (!details.isEmpty())
+        results.setDetailedText(details.join(QLatin1Char('\n')));
+    results.exec();
+
+    QSet<QString> movedPaths;
+    for (const auto &item : record.items)
+    {
+        if (item.status == DiskLens::RecoveryStatus::Moved)
+            movedPaths.insert(item.originalPath);
+    }
+
+    for (int groupRow = duplicatesModel_->rowCount() - 1; groupRow >= 0; --groupRow)
+    {
+        auto *groupItem = duplicatesModel_->item(groupRow, 0);
+        for (int fileRow = groupItem->rowCount() - 1; fileRow >= 0; --fileRow)
+        {
+            if (movedPaths.contains(groupItem->child(fileRow, 2)->text()))
+                groupItem->removeRow(fileRow);
+        }
+
+        if (groupItem->rowCount() < 2)
+            duplicatesModel_->removeRow(groupRow);
+    }
+
+    for (int groupRow = 0; groupRow < duplicatesModel_->rowCount(); ++groupRow)
+    {
+        auto *groupItem = duplicatesModel_->item(groupRow, 0);
+        groupItem->setText(QStringLiteral("Group %1 (%2 copies)").arg(groupRow + 1).arg(groupItem->rowCount()));
+    }
+
+    updateDuplicateMarkSummary();
+
+    if (moved > 0)
+        statusLabel_->setText(QStringLiteral("Some files were moved. Rescan to refresh sizes."));
+}
+
+void MainWindow::updateDuplicateMarkSummary()
+{
+    int markedCount = 0;
+    quint64 markedBytes = 0;
+
+    for (int groupRow = 0; groupRow < duplicatesModel_->rowCount(); ++groupRow)
+    {
+        auto *groupItem = duplicatesModel_->item(groupRow, 0);
+        for (int fileRow = 0; fileRow < groupItem->rowCount(); ++fileRow)
+        {
+            auto *fileItem = groupItem->child(fileRow, 0);
+            if (fileItem->checkState() == Qt::Checked)
+            {
+                ++markedCount;
+                markedBytes += fileItem->data(Qt::UserRole).toULongLong();
+            }
+        }
+    }
+
+    const QString tabText = markedCount == 0 ? QStringLiteral("Duplicates") : QStringLiteral("Duplicates (%1 marked, %2)").arg(markedCount).arg(QLocale().formattedDataSize(markedBytes));
+    contentTabs_->setTabText(contentTabs_->indexOf(duplicatesTreeView_), tabText);
+
+    moveToRecoveryAction_->setEnabled(markedCount > 0);
 }
